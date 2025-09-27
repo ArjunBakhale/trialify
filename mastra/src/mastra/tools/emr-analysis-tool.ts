@@ -127,38 +127,86 @@ export async function analyzePatientEMR(
     };
 
     // Extract age from free-form text with improved patterns
+    // Prioritize patterns that are more likely to be age (with "old" or at start of sentence)
     const ageMatch = findFirstMatch([
-      /(\d{1,3})\s*(?:years?|yrs?)\s*(?:old)?/i,
-      /age\s*(?:is|:)?\s*(\d{1,3})/i,
-      /(\d{1,3})\s*(?:y\/o|yo)\b/i,
-      /(\d{1,3})\s*(?:yo|y\.o\.)/i,
-      /age[:\s]*(\d{1,3})/i,
+      /(\d{1,3})\s*(?:years?|yrs?)\s*old/i,  // "65 years old" - highest priority
+      /(\d{1,3})-year-old/i,                // "65-year-old" - high priority
+      /age\s*(?:is|:)?\s*(\d{1,3})/i,       // "age is 65" - medium priority
+      /(\d{1,3})\s*(?:y\/o|yo)\b/i,         // "65 y/o" - medium priority
+      /(\d{1,3})\s*(?:yo|y\.o\.)/i,         // "65 yo" - medium priority
+      /age[:\s]*(\d{1,3})/i,                // "age: 65" - medium priority
+      /(\d{1,3})\s*(?:years?|yrs?)(?!\s*(?:of|on|for|with))/i, // "65 years" but not "3 years of treatment"
     ]);
     const extractedAge = ageMatch ? parseInt(ageMatch[1], 10) : null;
     const age = validateAge(extractedAge ?? demographics?.age ?? 50);
 
-    // Extract diagnosis or condition statements with comprehensive patterns
-    const diagnosisMatch = findFirstMatch([
-      /diagnosed\s+with\s+([^.;]+)/i,
-      /primary\s+diagnosis[:\s]+([^.;]+)/i,
-      /has\s+a\s+history\s+of\s+([^.;]+)/i,
-      /condition[:\s]+([^.;]+)/i,
-      /disease[:\s]+([^.;]+)/i,
-      /diagnosis[:\s]+([^.;]+)/i,
-      /presenting\s+with\s+([^.;]+)/i,
-      /chief\s+complaint[:\s]+([^.;]+)/i,
-      /reason\s+for\s+visit[:\s]+([^.;]+)/i,
-      /medical\s+condition[:\s]+([^.;]+)/i,
-      /suffering\s+from\s+([^.;]+)/i,
-      /affected\s+by\s+([^.;]+)/i,
-      /has\s+([^.;]+)/i,
-      /patient\s+with\s+([^.;]+)/i,
-      /case\s+of\s+([^.;]+)/i,
-      /history\s+of\s+([^.;]+)/i,
-      /status\s+post\s+([^.;]+)/i,
-      /s\/p\s+([^.;]+)/i,
-    ]);
-    const diagnosis = diagnosisMatch ? cleanDiagnosis(diagnosisMatch[1]) : "Unknown condition";
+    // First, try to identify specific diseases directly from the text
+    let diagnosis = "Unknown condition";
+    const textLower = normalized.toLowerCase();
+    
+    // Direct disease identification from text
+    if (textLower.includes('alzheimer')) {
+      diagnosis = "Alzheimer's disease";
+    } else if (textLower.includes('parkinson')) {
+      diagnosis = "Parkinson's disease";
+    } else if (textLower.includes('multiple sclerosis')) {
+      diagnosis = "Multiple Sclerosis";
+    } else if (textLower.includes('type 2 diabetes') || textLower.includes('diabetes mellitus')) {
+      diagnosis = "Type 2 Diabetes";
+    } else if (textLower.includes('type 1 diabetes')) {
+      diagnosis = "Type 1 Diabetes";
+    } else if (textLower.includes('breast cancer') || textLower.includes('breast carcinoma') || textLower.includes('invasive ductal carcinoma')) {
+      diagnosis = "Breast Cancer";
+    } else if (textLower.includes('lung cancer')) {
+      diagnosis = "Lung Cancer";
+    } else if (textLower.includes('prostate cancer')) {
+      diagnosis = "Prostate Cancer";
+    } else if (textLower.includes('colon cancer') || textLower.includes('colorectal cancer')) {
+      diagnosis = "Colorectal Cancer";
+    } else if (textLower.includes('hypertension') || textLower.includes('high blood pressure') || textLower.includes('essential hypertension')) {
+      diagnosis = "Hypertension";
+    } else if (textLower.includes('heart failure') || textLower.includes('congestive heart failure')) {
+      diagnosis = "Heart Failure";
+    } else if (textLower.includes('copd') || textLower.includes('chronic obstructive pulmonary disease')) {
+      diagnosis = "COPD";
+    } else if (textLower.includes('asthma')) {
+      diagnosis = "Asthma";
+    } else if (textLower.includes('depression') || textLower.includes('major depressive disorder')) {
+      diagnosis = "Depression";
+    } else if (textLower.includes('anxiety')) {
+      diagnosis = "Anxiety";
+    } else if (textLower.includes('rheumatoid arthritis')) {
+      diagnosis = "Rheumatoid Arthritis";
+    } else if (textLower.includes('diabetic nephropathy')) {
+      diagnosis = "Diabetic Nephropathy";
+    } else if (textLower.includes('coronary artery disease')) {
+      diagnosis = "Coronary Artery Disease";
+    } else {
+      // Fallback to pattern matching if no direct disease found
+      const diagnosisMatch = findFirstMatch([
+        /diagnosed\s+with\s+([^.;]+)/i,
+        /primary\s+diagnosis[:\s]+([^.;]+)/i,
+        /has\s+a\s+history\s+of\s+([^.;]+)/i,
+        /condition[:\s]+([^.;]+)/i,
+        /disease[:\s]+([^.;]+)/i,
+        /diagnosis[:\s]+([^.;]+)/i,
+        /presenting\s+with\s+([^.;]+)/i,
+        /chief\s+complaint[:\s]+([^.;]+)/i,
+        /reason\s+for\s+visit[:\s]+([^.;]+)/i,
+        /medical\s+condition[:\s]+([^.;]+)/i,
+        /suffering\s+from\s+([^.;]+)/i,
+        /affected\s+by\s+([^.;]+)/i,
+        /has\s+([^.;]+)/i,
+        /patient\s+with\s+([^.;]+)/i,
+        /case\s+of\s+([^.;]+)/i,
+        /history\s+of\s+([^.;]+)/i,
+        /status\s+post\s+([^.;]+)/i,
+        /s\/p\s+([^.;]+)/i,
+      ]);
+      
+      diagnosis = diagnosisMatch && diagnosisMatch[1] ? cleanDiagnosis(diagnosisMatch[1]) : "Unknown condition";
+    }
+
 
     // Extract diagnosis code if present
     const diagnosisCodeMatch = findFirstMatch([
