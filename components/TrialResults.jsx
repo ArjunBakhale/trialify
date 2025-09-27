@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ExternalLink, MapPin, Calendar, Users, AlertCircle } from 'lucide-react'
+import { ExternalLink, MapPin, Calendar, Users, AlertCircle, TrendingUp, Shield } from 'lucide-react'
 
 const TrialResults = ({ trials }) => {
   // Handle edge cases
@@ -52,6 +52,24 @@ const TrialResults = ({ trials }) => {
       return 'bg-yellow-500 text-black hover:bg-yellow-600'
     }
     return 'bg-gray-500 text-white hover:bg-gray-600'
+  }
+
+  // Get dropout risk badge styling
+  const getRiskBadgeColor = (riskLevel) => {
+    if (!riskLevel) return 'bg-gray-100 text-gray-600'
+    
+    switch (riskLevel) {
+      case 'LOW':
+        return 'bg-green-100 text-green-700 border-green-200'
+      case 'MODERATE':
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200'
+      case 'HIGH':
+        return 'bg-orange-100 text-orange-700 border-orange-200'
+      case 'VERY_HIGH':
+        return 'bg-red-100 text-red-700 border-red-200'
+      default:
+        return 'bg-gray-100 text-gray-600'
+    }
   }
 
   return (
@@ -104,6 +122,14 @@ const TrialResults = ({ trials }) => {
                 {trial.matchScore && (
                   <Badge variant="outline" className="text-xs bg-teal-50 text-teal-700 border-teal-200">
                     {Math.round(trial.matchScore * 100)}% Match
+                  </Badge>
+                )}
+
+                {/* Dropout Risk Badge */}
+                {trial.dropoutRisk && (
+                  <Badge variant="outline" className={`text-xs ${getRiskBadgeColor(trial.dropoutRisk.riskLevel)}`}>
+                    <TrendingUp className="w-3 h-3 mr-1" />
+                    {trial.dropoutRisk.riskLevel} Risk ({Math.round(trial.dropoutRisk.overallRisk * 100)}%)
                   </Badge>
                 )}
               </div>
@@ -227,6 +253,71 @@ const TrialResults = ({ trials }) => {
                   <p className="text-sm text-muted-foreground">
                     {trial.eligibilityCriteria}
                   </p>
+                </div>
+              )}
+
+              {/* Dropout Risk Assessment */}
+              {trial.dropoutRisk && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Shield className="w-4 h-4 text-blue-600" />
+                    <h4 className="font-semibold text-sm text-blue-900">Dropout Risk Assessment</h4>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {/* Risk Level */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Risk Level:</span>
+                      <Badge className={`text-xs ${getRiskBadgeColor(trial.dropoutRisk.riskLevel)}`}>
+                        {trial.dropoutRisk.riskLevel}
+                      </Badge>
+                    </div>
+                    
+                    {/* Risk Score */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Risk Score:</span>
+                      <span className="text-sm font-mono">{Math.round(trial.dropoutRisk.overallRisk * 100)}%</span>
+                    </div>
+                    
+                    {/* Confidence */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Confidence:</span>
+                      <span className="text-sm font-mono">{Math.round(trial.dropoutRisk.confidence * 100)}%</span>
+                    </div>
+                  </div>
+
+                  {/* Risk Factors */}
+                  {trial.riskFactors && trial.riskFactors.length > 0 && (
+                    <div className="mt-4">
+                      <h5 className="font-medium text-sm mb-2">Key Risk Factors:</h5>
+                      <div className="space-y-2">
+                        {trial.riskFactors.slice(0, 3).map((factor, idx) => (
+                          <div key={idx} className="text-xs">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-medium">{factor.factor}</span>
+                              <span className="text-muted-foreground">{Math.round(factor.impact * 100)}% impact</span>
+                            </div>
+                            <p className="text-muted-foreground">{factor.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mitigation Recommendations */}
+                  {trial.riskMitigationRecommendations && trial.riskMitigationRecommendations.length > 0 && (
+                    <div className="mt-4">
+                      <h5 className="font-medium text-sm mb-2">Recommendations:</h5>
+                      <ul className="text-xs space-y-1">
+                        {trial.riskMitigationRecommendations.slice(0, 3).map((rec, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="text-blue-600 font-medium">•</span>
+                            <span className="text-muted-foreground">{rec}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 

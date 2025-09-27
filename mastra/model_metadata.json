@@ -1,0 +1,41 @@
+{
+  "model_type": "RandomForestClassifier",
+  "version": "1.0.0",
+  "training_date": "2025-09-27T16:12:02.208679",
+  "accuracy": 0.825,
+  "feature_names": [
+    "Age",
+    "Gender",
+    "Systolic_BP",
+    "Diastolic_BP",
+    "Cholesterol_Level",
+    "Adverse_Events",
+    "Treatment_Group"
+  ],
+  "feature_importance": {
+    "Adverse_Events": 0.357383822943566,
+    "Treatment_Group": 0.1365892484264639,
+    "Age": 0.1329415869967807,
+    "Cholesterol_Level": 0.12245469428814362,
+    "Systolic_BP": 0.11864505314126923,
+    "Diastolic_BP": 0.11339158041410986,
+    "Gender": 0.018594013789666727
+  },
+  "model_parameters": {
+    "n_estimators": 100,
+    "random_state": 42
+  },
+  "preprocessing": {
+    "categorical_features": [
+      "Gender",
+      "Treatment_Group"
+    ],
+    "numerical_features": [
+      "Age",
+      "Systolic_BP",
+      "Diastolic_BP",
+      "Cholesterol_Level",
+      "Adverse_Events"
+    ]
+  }
+}

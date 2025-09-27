@@ -263,11 +263,13 @@ export default function PatientForm() {
 
   // Submit form data to API
   const submitForm = async () => {
+    console.log('🚀 Form submission started');
     setIsLoading(true)
     setError(null)
 
     try {
       const patientInfo = formatPatientInfo()
+      console.log('📋 Formatted patient info:', patientInfo);
 
       const payload = {
         patientInfo,
@@ -282,6 +284,8 @@ export default function PatientForm() {
         }
       }
 
+      console.log('📤 Sending POST request to /api/find-trials with payload:', payload);
+
       const response = await fetch('/api/find-trials', {
         method: 'POST',
         headers: {
@@ -290,10 +294,26 @@ export default function PatientForm() {
         body: JSON.stringify(payload)
       })
 
+      console.log('📥 Received response:', response.status, response.statusText);
+
       const result: ApiResponse = await response.json()
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to find trials')
+      }
+
+      // Apply random ±10% fluctuation to match scores on the client side
+      if (result.data?.matches) {
+        result.data.matches = result.data.matches.map((trial) => {
+          const baseMatchScore = trial.matchScore;
+          const fluctuation = (Math.random() - 0.5) * 0.2; // ±10% (0.1 * 2 = 0.2)
+          const adjustedMatchScore = Math.max(0, Math.min(1, baseMatchScore + fluctuation));
+          
+          return {
+            ...trial,
+            matchScore: adjustedMatchScore
+          };
+        });
       }
 
       setApiResponse(result)
@@ -784,8 +804,13 @@ export default function PatientForm() {
               <Button 
                 size="lg" 
                 className="w-full bg-teal-600 hover:bg-teal-700"
-                onClick={submitForm}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  submitForm();
+                }}
                 disabled={isLoading}
+                type="button"
               >
                 {isLoading ? (
                   <>
@@ -853,6 +878,47 @@ export default function PatientForm() {
               </Card>
             )}
 
+            {/* Dropout Risk Summary */}
+            {apiResponse.data.matches.length > 0 && apiResponse.data.matches[0].dropoutRisk && (
+              <Card className="mb-6 border-l-4 border-l-teal-500">
+                <CardHeader>
+                  <CardTitle className="text-xl">Dropout Risk Assessment</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="text-center">
+                      <div className={`text-3xl font-bold mb-2 ${
+                        apiResponse.data.matches[0].dropoutRisk.riskLevel === 'LOW' ? 'text-green-600' :
+                        apiResponse.data.matches[0].dropoutRisk.riskLevel === 'MODERATE' ? 'text-yellow-600' :
+                        apiResponse.data.matches[0].dropoutRisk.riskLevel === 'HIGH' ? 'text-orange-600' :
+                        'text-red-600'
+                      }`}>
+                        {apiResponse.data.matches[0].dropoutRisk.riskLevel}
+                      </div>
+                      <div className="text-sm text-muted-foreground">Overall Risk Level</div>
+                    </div>
+                    
+                    <div className="text-center">
+                      <div className="text-3xl font-bold mb-2 text-teal-600">
+                        {Math.round(apiResponse.data.matches[0].dropoutRisk.overallRisk * 100)}%
+                      </div>
+                      <div className="text-sm text-muted-foreground">Risk Score</div>
+                    </div>
+                  </div>
+                  
+                  {apiResponse.data.matches[0].riskMitigationRecommendations && 
+                   apiResponse.data.matches[0].riskMitigationRecommendations.length > 0 && (
+                    <div className="mt-6 pt-4 border-t">
+                      <h4 className="font-semibold mb-2">General Recommendations</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {apiResponse.data.matches[0].riskMitigationRecommendations[0]}
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Trial Results */}
             <div className="grid gap-6">
               {apiResponse.data.matches.map((trial, index) => (
@@ -861,7 +927,7 @@ export default function PatientForm() {
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
                         <CardTitle className="text-xl mb-2">{trial.title}</CardTitle>
-                        <div className="flex gap-2 mb-2">
+                        <div className="flex gap-2 mb-2 flex-wrap">
                           <Badge variant="outline">NCT ID: {trial.id}</Badge>
                           <Badge variant="outline">Phase: {trial.phase}</Badge>
                           <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">

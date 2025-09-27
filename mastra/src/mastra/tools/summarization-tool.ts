@@ -82,6 +82,19 @@ export const SummarizationInputSchema = z.object({
         relevanceScore: z.number().min(0).max(1).optional(),
       })).default([]),
       matchReasons: z.array(z.string()).default([]),
+      // Dropout risk assessment data
+      dropoutRisk: z.object({
+        overallRisk: z.number().min(0).max(1),
+        riskLevel: z.enum(['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH']),
+        confidence: z.number().min(0).max(1),
+      }).optional(),
+      riskFactors: z.array(z.object({
+        factor: z.string(),
+        impact: z.number().min(0).max(1),
+        description: z.string(),
+        mitigation: z.string().optional(),
+      })).optional(),
+      riskMitigationRecommendations: z.array(z.string()).optional(),
     })),
     searchMetadata: z.object({
       searchTerms: z.array(z.string()),
@@ -130,6 +143,19 @@ export const SummarizationInputSchema = z.object({
       reasoning: z.string(),
       recommendations: z.array(z.string()).default([]),
       safetyFlags: z.array(z.string()).default([]),
+      // Dropout risk assessment data
+      dropoutRisk: z.object({
+        overallRisk: z.number().min(0).max(1),
+        riskLevel: z.enum(['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH']),
+        confidence: z.number().min(0).max(1),
+      }).optional(),
+      riskFactors: z.array(z.object({
+        factor: z.string(),
+        impact: z.number().min(0).max(1),
+        description: z.string(),
+        mitigation: z.string().optional(),
+      })).optional(),
+      riskMitigationRecommendations: z.array(z.string()).optional(),
     })),
     summary: z.object({
       totalTrialsAssessed: z.number(),
@@ -163,6 +189,19 @@ export const ClinicalReportSchema = z.object({
       locations: z.array(z.string()).default([]),
     }),
     next_steps: z.array(z.string()).default([]),
+    // Dropout risk assessment data
+    dropoutRisk: z.object({
+      overallRisk: z.number().min(0).max(1),
+      riskLevel: z.enum(['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH']),
+      confidence: z.number().min(0).max(1),
+    }).optional(),
+    riskFactors: z.array(z.object({
+      factor: z.string(),
+      impact: z.number().min(0).max(1),
+      description: z.string(),
+      mitigation: z.string().optional(),
+    })).optional(),
+    riskMitigationRecommendations: z.array(z.string()).optional(),
   })),
   ineligible_trials: z.array(z.object({
     nct_id: z.string(),
@@ -173,11 +212,19 @@ export const ClinicalReportSchema = z.object({
   recommendations: z.string(),
   literature_support: z.array(z.string()),
   safety_flags: z.array(z.string()).default([]),
+  // Dropout risk summary
+  dropoutRiskSummary: z.object({
+    overallRiskLevel: z.enum(['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH']),
+    highestRiskTrial: z.string().optional(),
+    riskMitigationStrategies: z.array(z.string()),
+    averageDropoutRisk: z.number().min(0).max(1).optional(),
+  }).optional(),
   workflow_metadata: z.object({
     execution_time_ms: z.number(),
     agents_activated: z.array(z.string()),
     api_calls_made: z.number(),
     confidence_score: z.number().min(0).max(1),
+    dropout_assessments_completed: z.number().optional(),
   }),
 });
 
@@ -264,6 +311,10 @@ Patient Profile Summary:
           }).filter(loc => loc !== 'Location not specified') || [],
         },
         next_steps: assessment.recommendations,
+        // Include dropout risk data if available
+        dropoutRisk: assessment.dropoutRisk,
+        riskFactors: assessment.riskFactors,
+        riskMitigationRecommendations: assessment.riskMitigationRecommendations,
       };
     });
 
@@ -280,14 +331,51 @@ Patient Profile Summary:
       };
     });
 
+  // Generate dropout risk summary first
+  const dropoutRiskSummary = eligibleTrials.length > 0 ? (() => {
+    const trialsWithRisk = eligibleTrials.filter(trial => trial.dropoutRisk);
+    if (trialsWithRisk.length === 0) return undefined;
+    
+    const riskLevels = trialsWithRisk.map(trial => trial.dropoutRisk!.riskLevel);
+    const riskScores = trialsWithRisk.map(trial => trial.dropoutRisk!.overallRisk);
+    
+    const overallRiskLevel = riskLevels.includes('VERY_HIGH') ? 'VERY_HIGH' :
+                            riskLevels.includes('HIGH') ? 'HIGH' :
+                            riskLevels.includes('MODERATE') ? 'MODERATE' : 'LOW';
+    
+    const highestRiskTrial = trialsWithRisk.reduce((highest, current) => 
+      current.dropoutRisk!.overallRisk > highest.dropoutRisk!.overallRisk ? current : highest
+    );
+    
+    const averageDropoutRisk = riskScores.reduce((sum, score) => sum + score, 0) / riskScores.length;
+    
+    const riskMitigationStrategies = [
+      'Implement enhanced patient support services',
+      'Provide comprehensive trial education',
+      'Arrange transportation assistance if needed',
+      'Coordinate with primary care providers',
+      'Implement frequent check-ins and monitoring',
+    ];
+    
+    return {
+      overallRiskLevel,
+      highestRiskTrial: highestRiskTrial.nct_id,
+      riskMitigationStrategies,
+      averageDropoutRisk,
+    };
+  })() : undefined;
+
   // Generate recommendations
   const recommendations = `
 Based on the comprehensive analysis, ${eligibleTrials.length} clinical trials were identified as eligible for this patient.
 
 Top Recommendations:
-${eligibleTrials.slice(0, 3).map((trial, index) => 
-  `${index + 1}. ${trial.title} (NCT: ${trial.nct_id}) - Match Score: ${(trial.match_score * 100).toFixed(1)}%`
-).join('\n')}
+${eligibleTrials.slice(0, 3).map((trial, index) => {
+  const dropoutInfo = trial.dropoutRisk ? 
+    ` - Dropout Risk: ${trial.dropoutRisk.riskLevel} (${(trial.dropoutRisk.overallRisk * 100).toFixed(1)}%)` : 
+    '';
+  return `${index + 1}. ${trial.title} (NCT: ${trial.nct_id}) - Match Score: ${(trial.match_score * 100).toFixed(1)}%${dropoutInfo}`;
+}).join('\n')}
 
 ${eligibleTrials.length > 0 ? `
 The patient appears to be a good candidate for clinical trial participation. Key factors supporting eligibility include:
@@ -295,6 +383,16 @@ The patient appears to be a good candidate for clinical trial participation. Key
 - Diagnosis matches trial inclusion criteria
 - No major exclusion criteria conflicts identified
 - Available trial locations accessible to patient
+
+${dropoutRiskSummary ? `
+Dropout Risk Assessment:
+- Overall Risk Level: ${dropoutRiskSummary.overallRiskLevel}
+- Average Dropout Risk: ${(dropoutRiskSummary.averageDropoutRisk * 100).toFixed(1)}%
+- Highest Risk Trial: ${dropoutRiskSummary.highestRiskTrial}
+
+Risk Mitigation Strategies:
+${dropoutRiskSummary.riskMitigationStrategies.map(strategy => `- ${strategy}`).join('\n')}
+` : ''}
 ` : `
 No immediately eligible trials were identified. Consider:
 - Expanding search criteria to include broader conditions
@@ -307,6 +405,7 @@ Next Steps:
 2. Contact trial coordinators for enrollment information
 3. Schedule additional screening if required
 4. Consider patient preferences and logistics
+${dropoutRiskSummary ? '5. Implement dropout risk mitigation strategies for high-risk trials' : ''}
   `.trim();
 
   // Collect literature support
@@ -336,11 +435,13 @@ Next Steps:
     recommendations,
     literature_support: literatureSupport,
     safety_flags: safetyFlags,
+    dropoutRiskSummary,
     workflow_metadata: {
       execution_time_ms: totalExecutionTime,
       agents_activated: ["EMR_Analysis_Agent", "Trial_Scout_Agent", "Eligibility_Screener_Agent", "Summarization_Agent"],
       api_calls_made: totalApiCalls,
       confidence_score: confidenceScore,
+      dropout_assessments_completed: eligibleTrials.filter(trial => trial.dropoutRisk).length,
     },
   });
 }

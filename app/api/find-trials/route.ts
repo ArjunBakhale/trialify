@@ -15,6 +15,19 @@ interface EligibleTrial {
     locations: string[];
   };
   next_steps: string[];
+  // Dropout risk data
+  dropoutRisk?: {
+    overallRisk: number;
+    riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH';
+    confidence: number;
+  };
+  riskFactors?: Array<{
+    factor: string;
+    impact: number;
+    description: string;
+    mitigation?: string;
+  }>;
+  riskMitigationRecommendations?: string[];
 }
 
 interface IneligibleTrial {
@@ -60,6 +73,7 @@ const findTrialsSchema = z.object({
 // Only export POST handler - App Router automatically handles method routing
 export async function POST(request: NextRequest) {
   try {
+    console.log('✅ POST request received to /api/find-trials');
     // Parse the request body
     const body = await request.json();
     console.log('Received request body:', body); // Debug log
@@ -97,9 +111,21 @@ export async function POST(request: NextRequest) {
 
     console.log('Prepared workflow input:', workflowInput); // Debug log
 
-    // Execute the clinical trial workflow - commented out for build
-    const run = await mastra.getWorkflow("clinicalTrialWorkflow").createRunAsync();
+    // Execute the working clinical trial workflow with dropout prediction
+    console.log('🔄 Getting workflow: workingClinicalTrialWorkflow');
+    let workflow;
+    try {
+      workflow = mastra.getWorkflow("workingClinicalTrialWorkflow");
+      console.log('✅ Workflow found:', workflow.id);
+    } catch (workflowError) {
+      console.error('❌ Failed to get workflow:', workflowError);
+      throw new Error(`Workflow not found: ${workflowError}`);
+    }
+    
+    const run = await workflow.createRunAsync();
+    console.log('✅ Workflow run created, starting execution...');
     const result = await run.start(workflowInput);
+    console.log('✅ Workflow execution completed, status:', result.status);
 
     if (result.status !== 'success') {
       throw new Error(`${result.status}: Failed to process clinical trial matching request`);
@@ -133,7 +159,11 @@ export async function POST(request: NextRequest) {
             estimatedCompletion: 'December 2025', // Enhanced mock data
             enrollment: 500 // Enhanced mock data
           },
-          nextSteps: trial.next_steps
+          nextSteps: trial.next_steps,
+          // Dropout risk data
+          dropoutRisk: trial.dropoutRisk,
+          riskFactors: trial.riskFactors,
+          riskMitigationRecommendations: trial.riskMitigationRecommendations
         })),
         patientSummary: {
           summary: clinicalReport.patient_summary,
@@ -159,18 +189,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(responseData);
 
   } catch (error) {
-    console.error('Clinical trial matching error:', error);
+    console.error('❌ Clinical trial matching error:', error);
+    console.error('❌ Error stack:', (error as Error).stack);
+    console.error('❌ Error details:', {
+      name: (error as Error).name,
+      message: (error as Error).message,
+      cause: (error as Error).cause
+    });
     
     return NextResponse.json({
       success: false,
       error: 'Failed to process clinical trial matching request',
-      details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
+      details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined,
+      stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined
     }, { status: 500 });
   }
 }
 
 // Handle other HTTP methods
 export async function GET() {
+  console.log('❌ GET request received to /api/find-trials - this endpoint only accepts POST requests');
   return NextResponse.json({
     success: false,
     error: 'Method not allowed. This endpoint only accepts POST requests.'
