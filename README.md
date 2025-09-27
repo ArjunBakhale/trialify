@@ -1,2 +1,2 @@
 # Trialify
-connecting patienets with clinical research
+connecting patients with clinical research
