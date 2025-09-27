@@ -15,6 +15,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Check, ChevronsUpDown, Pencil, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
+import { redirect, RedirectType } from 'next/navigation'
 
 interface FormData {
   diagnosis: string
@@ -141,6 +142,8 @@ export default function PatientForm() {
   const prevStep = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1)
+    } else if (currentStep === 0) {
+      redirect("/", RedirectType.replace)
     }
   }
 
@@ -1080,7 +1083,7 @@ export default function PatientForm() {
               variant="ghost"
               size="sm"
               onClick={prevStep}
-              disabled={currentStep === 0 || currentStep === totalSteps - 1}
+              disabled={currentStep === totalSteps - 1}
               className="flex items-center gap-2"
             >
               <ArrowLeft className="w-4 h-4" />

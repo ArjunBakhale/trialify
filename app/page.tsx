@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar } from "@/components/ui/avatar"
-import { DollarSign, Scale, Milestone } from "lucide-react"
+import { DollarSign, TrendingDown, Milestone } from "lucide-react"
 import Link from "next/link"
 
 interface Node {
@@ -142,7 +142,7 @@ export default function LandingPage() {
         // Animate connections
         setTimeout(() => {
           setConnections((prev) => prev.map((conn) => ({ ...conn, opacity: 0.6 })))
-          setTimeout(() => setShowButtons(true), 1000)
+          setTimeout(() => setShowButtons(true), 50)
         }, 500)
       }
     }
@@ -178,9 +178,8 @@ export default function LandingPage() {
           >
             <h1 className="text-6xl font-bold mb-6 text-balance">From Labyrinth to Lifeline.</h1>
             <p className="text-xl text-muted-foreground mb-8 text-pretty max-w-3xl mx-auto">
-              Trailify is the ethical clinical trial recruitment platform that intelligently and equitably connects
-              diverse patient populations to life-saving research. Eliminate barriers, reduce costs, and accelerate the
-              future of medicine.
+              Trialify is the ethical clinical trial recruitment platform for HCPs that intelligently and equitably connects
+              diverse patient populations to life-saving research.
             </p>
             <p className="text-sm text-muted-foreground animate-pulse">Scroll to Connect</p>
           </div>
@@ -188,18 +187,15 @@ export default function LandingPage() {
           <div
             className={`transition-all duration-1000 ${isConnected ? "opacity-100 transform translate-y-0" : "opacity-0 transform translate-y-8"}`}
           >
-            <h1 className="text-6xl font-bold mb-6 text-balance">Clarity OS: Your Intelligent Synthesis Engine.</h1>
+            <h1 className="text-6xl font-bold mb-6 text-balance">Trialify: Connect Patients to Clinical Trials</h1>
             <div
               className={`flex gap-4 justify-center transition-all duration-500 delay-1000 ${showButtons ? "opacity-100 transform translate-y-0" : "opacity-0 transform translate-y-4"}`}
             >
               <Link href="/patient-form">
                 <Button size="lg" className="bg-teal-600 hover:bg-teal-700">
-                  Request a Demo
+                  Connect a Patient
                 </Button>
               </Link>
-              <Button variant="outline" size="lg">
-                How It Works
-              </Button>
             </div>
           </div>
         </div>
@@ -208,11 +204,12 @@ export default function LandingPage() {
       {/* Problem Section */}
       <section className="py-20 px-6">
         <div className="max-w-6xl mx-auto">
+          <h2 className="text-4xl font-bold text-center mb-12">What do we solve?</h2>
           <div className="grid md:grid-cols-3 gap-8">
             <Card className="bg-card border-border">
               <CardHeader>
                 <DollarSign className="w-12 h-12 text-teal-500 mb-4" />
-                <CardTitle className="text-xl">The Financial Bottleneck</CardTitle>
+                <CardTitle className="text-xl">The Costs</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
@@ -224,14 +221,12 @@ export default function LandingPage() {
 
             <Card className="bg-card border-border">
               <CardHeader>
-                <Scale className="w-12 h-12 text-teal-500 mb-4" />
-                <CardTitle className="text-xl">The Equity Gap</CardTitle>
+                <TrendingDown className="w-12 h-12 text-teal-500 mb-4" />
+                <CardTitle className="text-xl">The Dropout</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
-                  Trials often fail to represent our diverse population, leading to treatments that don&apos;t work for
-                  everyone. Socioeconomic and geographic barriers exclude countless eligible patients from accessing
-                  hope.
+                  Patients often withdraw from clinical trials before completion due to insufficient support or lack of percieved efficacy. More closely matching patients to trials can help reduce dropout and save time. 
                 </p>
               </CardContent>
             </Card>
@@ -239,7 +234,7 @@ export default function LandingPage() {
             <Card className="bg-card border-border">
               <CardHeader>
                 <Milestone className="w-12 h-12 text-teal-500 mb-4" />
-                <CardTitle className="text-xl">Overwhelming Complexity</CardTitle>
+                <CardTitle className="text-xl">The Complexity</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
@@ -249,94 +244,6 @@ export default function LandingPage() {
               </CardContent>
             </Card>
           </div>
-        </div>
-      </section>
-
-      {/* Solution Section */}
-      <section className="py-20 px-6 bg-muted/30">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-4xl font-bold text-center mb-16 text-balance">From Chaos to Clarity.</h2>
-
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div className="space-y-6">
-              <div className="flex items-center gap-4">
-                <Avatar className="w-12 h-12">
-                  <div className="w-full h-full bg-blue-600 rounded-full flex items-center justify-center text-white font-bold">
-                    EMR
-                  </div>
-                </Avatar>
-                <div>
-                  <h3 className="font-semibold">EMR/EHR Integration</h3>
-                  <p className="text-sm text-muted-foreground">Real-time patient data synthesis</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <Avatar className="w-12 h-12">
-                  <div className="w-full h-full bg-green-600 rounded-full flex items-center justify-center text-white font-bold">
-                    DNA
-                  </div>
-                </Avatar>
-                <div>
-                  <h3 className="font-semibold">Genomic Data</h3>
-                  <p className="text-sm text-muted-foreground">Precision matching algorithms</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <Avatar className="w-12 h-12">
-                  <div className="w-full h-full bg-purple-600 rounded-full flex items-center justify-center text-white font-bold">
-                    CT
-                  </div>
-                </Avatar>
-                <div>
-                  <h3 className="font-semibold">ClinicalTrials.gov</h3>
-                  <p className="text-sm text-muted-foreground">Comprehensive trial database</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="relative">
-              <div className="aspect-square bg-gradient-to-br from-teal-500/20 to-blue-500/20 rounded-full flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-4 h-4 bg-teal-500 rounded-full mx-auto mb-4"></div>
-                  <p className="text-sm font-medium">Your Patient&apos;s Trail</p>
-                  <p className="text-xs text-muted-foreground mt-2">Personalized pathway to the right trial</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 px-6">
-        <div className="max-w-2xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-8 text-balance">Accelerate Research. Expand Access.</h2>
-
-          <Card className="bg-card border-border">
-            <CardContent className="p-8">
-              <form className="space-y-6">
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Work Email</Label>
-                    <Input id="email" type="email" placeholder="you@company.com" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="organization">Organization Name</Label>
-                    <Input id="organization" placeholder="Your Organization" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="role">Your Role</Label>
-                  <Input id="role" placeholder="e.g., Clinical Research Coordinator" />
-                </div>
-                <Button type="submit" size="lg" className="w-full bg-teal-600 hover:bg-teal-700">
-                  Get Started with Trailify
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
         </div>
       </section>
     </div>
