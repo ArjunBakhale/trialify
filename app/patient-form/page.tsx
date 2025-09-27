@@ -12,7 +12,8 @@ import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Check, ChevronsUpDown, Pencil, ArrowLeft } from "lucide-react"
+import { Check, ChevronsUpDown, Pencil, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 
 interface FormData {
@@ -36,6 +37,55 @@ interface FormData {
   smokingHistory: string
 }
 
+interface TrialMatch {
+  id: string
+  title: string
+  phase: string
+  status: string
+  location: string
+  summary: string
+  matchScore: number
+  matchReason: string
+  eligibilityCriteria: string
+  contactInfo: {
+    name: string
+    phone: string
+    email: string
+  } | null
+  studyDetails: {
+    sponsor: string
+    estimatedCompletion: string
+    enrollment: number
+  }
+  nextSteps: string[]
+}
+
+interface ApiResponse {
+  success: boolean
+  data?: {
+    matches: TrialMatch[]
+    patientSummary: {
+      summary: string
+      recommendations: string
+      safetyFlags: string[]
+    }
+    supportingEvidence: Array<{
+      title: string
+      abstract: string
+      relevance: number
+      url: string
+    }>
+    metadata: {
+      processingTime: number
+      agentsActivated: string[]
+      confidenceScore: number
+      apiCallsMade: number
+    }
+  }
+  error?: string
+  details?: any
+}
+
 const diagnoses = [
   "Type 2 Diabetes",
   "Hypertension",
@@ -49,9 +99,12 @@ const diagnoses = [
   "Rheumatoid Arthritis",
 ]
 
-
 export default function PatientForm() {
   const [currentStep, setCurrentStep] = useState(0)
+  const [isLoading, setIsLoading] = useState(false)
+  const [apiResponse, setApiResponse] = useState<ApiResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  
   const [formData, setFormData] = useState<FormData>({
     diagnosis: "",
     age: "",
@@ -76,7 +129,7 @@ export default function PatientForm() {
   const [tempInput, setTempInput] = useState("")
   const [diagnosisOpen, setDiagnosisOpen] = useState(false)
 
-  const totalSteps = 10
+  const totalSteps = 11 // Added one more step for results
   const progress = ((currentStep + 1) / totalSteps) * 100
 
   const nextStep = () => {
@@ -124,6 +177,97 @@ export default function PatientForm() {
     if (e.key === "Enter") {
       e.preventDefault()
       addArrayItem(field)
+    }
+  }
+
+  // Format form data for API submission
+  const formatPatientInfo = (): string => {
+    const info = []
+    
+    info.push(`Primary Diagnosis: ${formData.diagnosis}`)
+    info.push(`Age: ${formData.age} years`)
+    
+    if (formData.medications.length > 0) {
+      info.push(`Current Medications: ${formData.medications.join(", ")}`)
+    }
+    
+    if (formData.comorbidities.length > 0) {
+      info.push(`Comorbidities: ${formData.comorbidities.join(", ")}`)
+    }
+    
+    if (formData.biomarkers.length > 0) {
+      info.push(`Relevant Biomarkers: ${formData.biomarkers.join(", ")}`)
+    }
+    
+    if (formData.priorTreatments.length > 0) {
+      info.push(`Prior Treatments: ${formData.priorTreatments.join(", ")}`)
+    }
+    
+    // Lab values
+    const labValues = []
+    if (formData.labValues.hba1c) labValues.push(`HbA1c: ${formData.labValues.hba1c}%`)
+    if (formData.labValues.egfr) labValues.push(`eGFR: ${formData.labValues.egfr} mL/min/1.73m²`)
+    if (formData.labValues.ldl) labValues.push(`LDL: ${formData.labValues.ldl} mg/dL`)
+    if (formData.labValues.hdl) labValues.push(`HDL: ${formData.labValues.hdl} mg/dL`)
+    if (labValues.length > 0) {
+      info.push(`Lab Values: ${labValues.join(", ")}`)
+    }
+    
+    // Blood pressure
+    if (formData.bloodPressure.systolic && formData.bloodPressure.diastolic) {
+      info.push(`Blood Pressure: ${formData.bloodPressure.systolic}/${formData.bloodPressure.diastolic} mmHg`)
+    }
+    
+    // Hospitalization
+    if (formData.hospitalized) {
+      info.push(`Hospitalized in last 90 days: ${formData.hospitalized === "yes" ? "Yes" : "No"}`)
+    }
+    
+    return info.join(". ")
+  }
+
+  // Submit form data to API
+  const submitForm = async () => {
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const patientInfo = formatPatientInfo()
+      
+      const payload = {
+        patientInfo,
+        demographics: {
+          age: formData.age ? parseInt(formData.age) : undefined,
+          location: "United States" // Default location, could be made configurable
+        },
+        preferences: {
+          maxTrials: 3,
+          includeCompletedTrials: false,
+          maxLiteratureResults: 5
+        }
+      }
+
+      const response = await fetch('/api/find-trials', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const result: ApiResponse = await response.json()
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to find trials')
+      }
+      
+      setApiResponse(result)
+      nextStep() // Move to results step
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -529,7 +673,7 @@ export default function PatientForm() {
           </Card>
         )
 
-      default:
+      case 10:
         return (
           <Card className="w-full max-w-4xl mx-auto">
             <CardHeader>
@@ -537,6 +681,13 @@ export default function PatientForm() {
               <p className="text-muted-foreground">Click the pencil icon to edit any section</p>
             </CardHeader>
             <CardContent className="space-y-6">
+              {error && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              
               <div className="grid gap-6">
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
@@ -595,11 +746,243 @@ export default function PatientForm() {
                 </div>
               </div>
 
-              <Button size="lg" className="w-full bg-teal-600 hover:bg-teal-700">
-                Find Matching Trials
+              <Button 
+                size="lg" 
+                className="w-full bg-teal-600 hover:bg-teal-700"
+                onClick={submitForm}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Finding Matching Trials...
+                  </>
+                ) : (
+                  'Find Matching Trials'
+                )}
               </Button>
             </CardContent>
           </Card>
+        )
+
+      default:
+        // Results step
+        if (!apiResponse?.data) {
+          return (
+            <Card className="w-full max-w-4xl mx-auto">
+              <CardContent className="text-center py-12">
+                <p className="text-muted-foreground">No results to display</p>
+              </CardContent>
+            </Card>
+          )
+        }
+
+        return (
+          <div className="w-full max-w-6xl mx-auto space-y-6">
+            {/* Success header */}
+            <Card>
+              <CardHeader className="text-center">
+                <div className="flex justify-center mb-4">
+                  <CheckCircle2 className="w-12 h-12 text-green-500" />
+                </div>
+                <CardTitle className="text-3xl text-green-600">Clinical Trials Found!</CardTitle>
+                <p className="text-muted-foreground text-lg">
+                  We found {apiResponse.data.matches.length} matching clinical trials for your patient
+                </p>
+              </CardHeader>
+            </Card>
+
+            {/* Patient Summary */}
+            {apiResponse.data.patientSummary && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Patient Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-4">{apiResponse.data.patientSummary.summary}</p>
+                  {apiResponse.data.patientSummary.recommendations && (
+                    <div>
+                      <h4 className="font-semibold mb-2">Recommendations:</h4>
+                      <p className="text-muted-foreground">{apiResponse.data.patientSummary.recommendations}</p>
+                    </div>
+                  )}
+                  {apiResponse.data.patientSummary.safetyFlags.length > 0 && (
+                    <Alert className="mt-4">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Safety considerations: {apiResponse.data.patientSummary.safetyFlags.join(", ")}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Trial Results */}
+            <div className="grid gap-6">
+              {apiResponse.data.matches.map((trial, index) => (
+                <Card key={trial.id} className="border-l-4 border-l-teal-500">
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <CardTitle className="text-xl mb-2">{trial.title}</CardTitle>
+                        <div className="flex gap-2 mb-2">
+                          <Badge variant="outline">NCT ID: {trial.id}</Badge>
+                          <Badge variant="outline">Phase: {trial.phase}</Badge>
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                            {Math.round(trial.matchScore * 100)}% Match
+                          </Badge>
+                        </div>
+                        <p className="text-muted-foreground text-sm mb-2">📍 {trial.location}</p>
+                        <p className="text-muted-foreground text-sm">🏥 Status: {trial.status}</p>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-semibold mb-2">Summary</h4>
+                        <p className="text-sm text-muted-foreground">{trial.summary}</p>
+                      </div>
+                      
+                      <div>
+                        <h4 className="font-semibold mb-2">Why This Trial Matches</h4>
+                        <p className="text-sm text-muted-foreground">{trial.matchReason}</p>
+                      </div>
+
+                      {trial.contactInfo && (
+                        <div>
+                          <h4 className="font-semibold mb-2">Contact Information</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {trial.contactInfo.name}
+                            {trial.contactInfo.phone !== 'N/A' && ` • ${trial.contactInfo.phone}`}
+                            {trial.contactInfo.email !== 'N/A' && ` • ${trial.contactInfo.email}`}
+                          </p>
+                        </div>
+                      )}
+
+                      {trial.nextSteps.length > 0 && (
+                        <div>
+                          <h4 className="font-semibold mb-2">Next Steps</h4>
+                          <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                            {trial.nextSteps.map((step, stepIndex) => (
+                              <li key={stepIndex}>{step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <div className="pt-4 border-t">
+                        <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                          View Full Trial Details
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Supporting Evidence */}
+            {apiResponse.data.supportingEvidence.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Supporting Literature</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {apiResponse.data.supportingEvidence.map((evidence, index) => (
+                      <div key={index} className="border-l-2 border-l-blue-200 pl-4">
+                        <h4 className="font-medium">{evidence.title}</h4>
+                        {evidence.abstract !== 'N/A' && (
+                          <p className="text-sm text-muted-foreground mt-1">{evidence.abstract}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          <Badge variant="outline" className="text-xs">
+                            Relevance: {Math.round(evidence.relevance * 100)}%
+                          </Badge>
+                          {evidence.url !== 'N/A' && (
+                            <a 
+                              href={evidence.url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-xs text-blue-600 hover:underline"
+                            >
+                              View Article
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Metadata */}
+            <Card className="bg-muted/30">
+              <CardHeader>
+                <CardTitle className="text-lg">Processing Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="font-medium">Processing Time</p>
+                    <p className="text-muted-foreground">{apiResponse.data.metadata.processingTime}ms</p>
+                  </div>
+                  <div>
+                    <p className="font-medium">Confidence Score</p>
+                    <p className="text-muted-foreground">{Math.round(apiResponse.data.metadata.confidenceScore * 100)}%</p>
+                  </div>
+                  <div>
+                    <p className="font-medium">API Calls</p>
+                    <p className="text-muted-foreground">{apiResponse.data.metadata.apiCallsMade}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium">Agents Used</p>
+                    <p className="text-muted-foreground">{apiResponse.data.metadata.agentsActivated.length}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Action Buttons */}
+            <div className="flex gap-4 justify-center">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setCurrentStep(0)
+                  setFormData({
+                    diagnosis: "",
+                    age: "",
+                    medications: [],
+                    comorbidities: [],
+                    biomarkers: [],
+                    priorTreatments: [],
+                    labValues: {
+                      hba1c: "",
+                      egfr: "",
+                      ldl: "",
+                      hdl: "",
+                    },
+                    bloodPressure: {
+                      systolic: "",
+                      diastolic: "",
+                    },
+                    hospitalized: "",
+                    smokingHistory: "",
+                  })
+                  setApiResponse(null)
+                  setError(null)
+                }}
+              >
+                Search for Another Patient
+              </Button>
+              <Button className="bg-teal-600 hover:bg-teal-700">
+                Export Results
+              </Button>
+            </div>
+          </div>
         )
     }
   }
@@ -614,14 +997,14 @@ export default function PatientForm() {
               variant="ghost"
               size="sm"
               onClick={prevStep}
-              disabled={currentStep === 0}
+              disabled={currentStep === 0 || currentStep === totalSteps - 1}
               className="flex items-center gap-2"
             >
               <ArrowLeft className="w-4 h-4" />
               Back
             </Button>
             <span className="text-sm text-muted-foreground">
-              Step {currentStep + 1} of {totalSteps}
+              {currentStep === totalSteps - 1 ? 'Results' : `Step ${currentStep + 1} of ${totalSteps - 1}`}
             </span>
           </div>
           <Progress value={progress} className="h-2" />
@@ -630,7 +1013,7 @@ export default function PatientForm() {
 
       {/* Form Content */}
       <div className="pt-24 px-6">
-        <div className="max-w-4xl mx-auto">{renderStep()}</div>
+        <div className="max-w-6xl mx-auto">{renderStep()}</div>
       </div>
     </div>
   )
