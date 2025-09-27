@@ -196,24 +196,30 @@ export const reportGeneratorTool = createTool({
   },
 });
 
-async function generateClinicalReport(input: SummarizationInput): Promise<ClinicalReport> {
+export async function generateClinicalReport(input: SummarizationInput): Promise<ClinicalReport> {
   const { patientProfile, trialScoutResults, eligibilityResults } = input;
+  const patientAgeDisplay = typeof patientProfile.age === "number"
+    ? `${patientProfile.age} years`
+    : "Not specified";
   
   // Generate patient summary
+  const labValueEntries = patientProfile.labValues
+    ? Object.entries(patientProfile.labValues).filter(([, value]) => value !== undefined)
+    : [];
+
   const patientSummary = `
 Patient Profile Summary:
-- Age: ${patientProfile.age} years
+- Age: ${patientAgeDisplay}
 - Primary Diagnosis: ${patientProfile.diagnosis}${patientProfile.diagnosisCode ? ` (${patientProfile.diagnosisCode})` : ''}
-- Current Medications: ${patientProfile.medications.join(', ') || 'None'}
-- Key Lab Values: ${Object.entries(patientProfile.labValues)
-    .filter(([_, value]) => value !== undefined)
+- Current Medications: ${(patientProfile.medications ?? []).join(', ') || 'None'}
+- Key Lab Values: ${labValueEntries
     .map(([key, value]) => `${key}: ${value}`)
     .join(', ') || 'None available'}
-- Comorbidities: ${patientProfile.comorbidities.join(', ') || 'None'}
+- Comorbidities: ${(patientProfile.comorbidities ?? []).join(', ') || 'None'}
 - Location: ${patientProfile.location || 'Not specified'}
 - Performance Status: ${patientProfile.performanceStatus || 'Not specified'}
-- Biomarkers: ${patientProfile.biomarkers.join(', ') || 'None'}
-- Prior Treatments: ${patientProfile.priorTreatments.join(', ') || 'None'}
+- Biomarkers: ${(patientProfile.biomarkers ?? []).join(', ') || 'None'}
+- Prior Treatments: ${(patientProfile.priorTreatments ?? []).join(', ') || 'None'}
   `.trim();
 
   // Process eligible trials

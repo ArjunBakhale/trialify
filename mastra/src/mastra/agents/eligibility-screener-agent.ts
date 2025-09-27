@@ -191,6 +191,66 @@ export const eligibilityScreenerAgent = new Agent({
     - Include specific inclusion matches and exclusion conflicts
     - Flag safety concerns and provide recommendations
     - Include comprehensive metadata for downstream processing
+    - Return results in structured JSON format matching the expected schema
+
+    IMPORTANT: Always return your results in the following JSON format:
+    {
+      "patientProfile": { /* patient profile data */ },
+      "eligibilityAssessments": [
+        {
+          "nctId": "NCT...",
+          "title": "Trial Title",
+          "eligibilityStatus": "ELIGIBLE|POTENTIALLY_ELIGIBLE|INELIGIBLE|REQUIRES_REVIEW",
+          "matchScore": 0.85,
+          "inclusionMatches": ["match1", "match2"],
+          "exclusionConflicts": ["conflict1", "conflict2"],
+          "ageEligibility": {
+            "eligible": true,
+            "reason": "Patient age 55 falls within trial range 18-75",
+            "patientAge": 55,
+            "trialMinAge": "18",
+            "trialMaxAge": "75"
+          },
+          "drugInteractions": [
+            {
+              "medication": "medication name",
+              "interaction": "interaction description",
+              "severity": "LOW|MODERATE|HIGH|CRITICAL",
+              "recommendation": "recommendation text"
+            }
+          ],
+          "locationEligibility": {
+            "eligible": true,
+            "reason": "Patient location matches trial locations",
+            "availableLocations": ["Location1", "Location2"]
+          },
+          "biomarkerEligibility": {
+            "eligible": true,
+            "reason": "Required biomarkers present",
+            "requiredBiomarkers": ["biomarker1", "biomarker2"],
+            "patientBiomarkers": ["biomarker1", "biomarker2"]
+          },
+          "reasoning": "Detailed reasoning for eligibility decision",
+          "recommendations": ["recommendation1", "recommendation2"],
+          "safetyFlags": ["flag1", "flag2"]
+        }
+      ],
+      "summary": {
+        "totalTrialsAssessed": 5,
+        "eligibleTrials": 2,
+        "potentiallyEligibleTrials": 1,
+        "ineligibleTrials": 2,
+        "requiresReviewTrials": 0,
+        "averageMatchScore": 0.75,
+        "topRecommendations": ["NCT1", "NCT2"],
+        "safetyConcerns": ["concern1", "concern2"]
+      },
+      "metadata": {
+        "executionTimeMs": 800,
+        "drugInteractionChecks": 5,
+        "eligibilityCriteriaEvaluated": 5
+      }
+    }
 
     Use the vectorQueryTool and openFdaDrugSafetyTool to assess patient eligibility for clinical trials.
   `,

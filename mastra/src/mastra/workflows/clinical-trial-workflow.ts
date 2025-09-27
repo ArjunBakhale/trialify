@@ -1,9 +1,9 @@
 import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
-import { emrAgent } from '../agents/emr-agent';
 import { trialScoutAgent } from '../agents/trial-scout-agent';
 import { eligibilityScreenerAgent } from '../agents/eligibility-screener-agent';
-import { summarizationAgent } from '../agents/summarization-agent';
+import { analyzePatientEMR } from '../tools/emr-analysis-tool';
+import { generateClinicalReport } from '../tools/summarization-tool';
 
 // Input schema for the clinical trial workflow
 const clinicalTrialWorkflowInputSchema = z.object({
@@ -50,59 +50,18 @@ const analyzeEMR = createStep({
       biomarkers: z.array(z.string()).default([]),
       priorTreatments: z.array(z.string()).default([]),
     }),
+    searchPreferences: clinicalTrialWorkflowInputSchema.shape.searchPreferences,
   }),
-  execute: async ({ inputData, mastra }) => {
-    const agent = mastra?.getAgent('emrAgent');
-    if (!agent) {
-      throw new Error('EMR agent not found');
-    }
+  execute: async ({ inputData }) => {
+    const patientProfile = await analyzePatientEMR(
+      inputData.patientData,
+      inputData.demographics
+    );
 
-    const prompt = `Please analyze the following patient EMR data and extract structured information:
-
-Patient Data: ${inputData.patientData}
-Demographics: ${JSON.stringify(inputData.demographics || {}, null, 2)}
-
-Please use the emrAnalysisTool to parse this data into a structured patient profile.`;
-
-    const response = await agent.stream([
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ]);
-
-    let resultText = '';
-    for await (const chunk of response.textStream) {
-      resultText += chunk;
-    }
-
-    // Parse the result (in a real implementation, this would be structured)
-    const patientProfile = {
-      diagnosis: 'Type 2 Diabetes Mellitus', // Mock data for development
-      diagnosisCode: 'E11',
-      age: inputData.demographics?.age || 55,
-      medications: ['metformin', 'insulin'],
-      labValues: {
-        hba1c: 8.2,
-        egfr: 75,
-        creatinine: 1.1,
-        glucose: 180,
-        bloodPressure: {
-          systolic: 140,
-          diastolic: 90,
-        },
-      },
-      comorbidities: ['hypertension', 'obesity'],
-      location: inputData.demographics?.location || 'New York, NY',
-      insurance: 'Medicare',
-      recentHospitalization: false,
-      smokingHistory: 'Former smoker',
-      performanceStatus: 'ECOG 0',
-      biomarkers: [],
-      priorTreatments: [],
+    return {
+      patientProfile,
+      searchPreferences: inputData.searchPreferences,
     };
-
-    return { patientProfile };
   },
 });
 
@@ -143,6 +102,31 @@ const scoutTrials = createStep({
     }).optional(),
   }),
   outputSchema: z.object({
+    patientProfile: z.object({
+      diagnosis: z.string(),
+      diagnosisCode: z.string().optional(),
+      age: z.number().int().positive(),
+      medications: z.array(z.string()),
+      labValues: z.object({
+        hba1c: z.number().optional(),
+        egfr: z.number().optional(),
+        creatinine: z.number().optional(),
+        glucose: z.number().optional(),
+        cholesterol: z.number().optional(),
+        bloodPressure: z.object({
+          systolic: z.number().optional(),
+          diastolic: z.number().optional(),
+        }).optional(),
+      }),
+      comorbidities: z.array(z.string()).default([]),
+      location: z.string().optional(),
+      insurance: z.string().optional(),
+      recentHospitalization: z.boolean().default(false),
+      smokingHistory: z.string().optional(),
+      performanceStatus: z.string().optional(),
+      biomarkers: z.array(z.string()).default([]),
+      priorTreatments: z.array(z.string()).default([]),
+    }),
     trialScoutResults: z.object({
       patientProfile: z.object({
         diagnosis: z.string(),
@@ -256,73 +240,55 @@ Please use the clinicalTrialsApiTool and pubmedApiTool to find relevant trials a
       resultText += chunk;
     }
 
-    // Mock trial scout results for development
-    const trialScoutResults = {
-      patientProfile: inputData.patientProfile,
-      candidateTrials: [
-        {
-          nctId: 'NCT00000001',
-          title: 'Efficacy of New Diabetes Medication',
-          status: 'RECRUITING',
-          phase: 'Phase 2',
-          studyType: 'Interventional',
-          condition: 'Type 2 Diabetes Mellitus',
-          intervention: 'New Diabetes Drug',
-          eligibilityCriteria: {
-            inclusionCriteria: ['Adults 18-75 years', 'HbA1c 7.0-10.5%', 'On stable metformin'],
-            exclusionCriteria: ['Pregnancy', 'Severe renal impairment', 'Active malignancy'],
-            minimumAge: '18',
-            maximumAge: '75',
-            gender: 'All',
-          },
-          locations: [
-            {
-              facility: 'Medical Center',
-              city: 'New York',
-              state: 'NY',
-              country: 'United States',
-              status: 'Recruiting',
-              contacts: [],
+    // Parse the agent response to extract trial data
+    // The agent should return structured data that we can parse
+    let trialScoutResults;
+    try {
+      // Try to parse JSON response from agent
+      const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        trialScoutResults = JSON.parse(jsonMatch[0]);
+      } else {
+        // If no JSON found, create a basic structure from the text response
+        trialScoutResults = {
+          patientProfile: inputData.patientProfile,
+          candidateTrials: [],
+          searchMetadata: {
+            searchTerms: [inputData.patientProfile.diagnosis],
+            totalTrialsFound: 0,
+            literatureQueries: [],
+            executionTimeMs: 1500,
+            apiCalls: {
+              clinicalTrials: 0,
+              pubmed: 0,
             },
-          ],
-          contacts: {
-            centralContact: 'Dr. Smith',
-            overallOfficial: 'Dr. Johnson',
           },
-          urls: {
-            clinicalTrialsGov: 'https://clinicaltrials.gov/study/NCT00000001',
+        };
+        console.log("⚠️ Agent response could not be parsed as JSON, using empty results");
+      }
+    } catch (error) {
+      console.error("❌ Failed to parse agent response:", error);
+      // Fallback to empty results
+      trialScoutResults = {
+        patientProfile: inputData.patientProfile,
+        candidateTrials: [],
+        searchMetadata: {
+          searchTerms: [inputData.patientProfile.diagnosis],
+          totalTrialsFound: 0,
+          literatureQueries: [],
+          executionTimeMs: 1500,
+          apiCalls: {
+            clinicalTrials: 0,
+            pubmed: 0,
           },
-          lastUpdate: '2024-01-01',
-          enrollmentCount: 100,
-          startDate: '2024-01-01',
-          completionDate: '2025-12-31',
-          literatureSupport: [
-            {
-              pmid: '12345678',
-              title: 'New Diabetes Treatment Approaches',
-              authors: ['Dr. Smith', 'Dr. Johnson'],
-              journal: 'Diabetes Research Journal',
-              publicationDate: '2024-01-01',
-              url: 'https://pubmed.ncbi.nlm.nih.gov/12345678/',
-              relevanceScore: 0.9,
-            },
-          ],
-          matchReasons: ['Condition match', 'Age eligible', 'Location available'],
         },
-      ],
-      searchMetadata: {
-        searchTerms: ['Type 2 Diabetes Mellitus', 'E11', 'hypertension', 'obesity'],
-        totalTrialsFound: 1,
-        literatureQueries: ['New Diabetes Drug Type 2 Diabetes Mellitus'],
-        executionTimeMs: 1500,
-        apiCalls: {
-          clinicalTrials: 1,
-          pubmed: 1,
-        },
-      },
-    };
+      };
+    }
 
-    return { trialScoutResults };
+    return { 
+      patientProfile: inputData.patientProfile,
+      trialScoutResults 
+    };
   },
 });
 
@@ -356,58 +322,207 @@ const screenEligibility = createStep({
       biomarkers: z.array(z.string()).default([]),
       priorTreatments: z.array(z.string()).default([]),
     }),
-    candidateTrials: z.array(z.object({
-      nctId: z.string(),
-      title: z.string().optional(),
-      status: z.string().optional(),
-      phase: z.string().optional(),
-      studyType: z.string().optional(),
-      condition: z.string().optional(),
-      intervention: z.string().optional(),
-      eligibilityCriteria: z.object({
-        inclusionCriteria: z.array(z.string()),
-        exclusionCriteria: z.array(z.string()),
-        minimumAge: z.string().optional(),
-        maximumAge: z.string().optional(),
-        gender: z.string().optional(),
+    trialScoutResults: z.object({
+      patientProfile: z.object({
+        diagnosis: z.string(),
+        diagnosisCode: z.string().optional(),
+        age: z.number().int().positive(),
+        medications: z.array(z.string()),
+        labValues: z.object({
+          hba1c: z.number().optional(),
+          egfr: z.number().optional(),
+          creatinine: z.number().optional(),
+          glucose: z.number().optional(),
+          cholesterol: z.number().optional(),
+          bloodPressure: z.object({
+            systolic: z.number().optional(),
+            diastolic: z.number().optional(),
+          }).optional(),
+        }),
+        comorbidities: z.array(z.string()).default([]),
+        location: z.string().optional(),
+        insurance: z.string().optional(),
+        recentHospitalization: z.boolean().default(false),
+        smokingHistory: z.string().optional(),
+        performanceStatus: z.string().optional(),
+        biomarkers: z.array(z.string()).default([]),
+        priorTreatments: z.array(z.string()).default([]),
       }),
-      locations: z.array(z.object({
-        facility: z.string().optional(),
-        city: z.string().optional(),
-        state: z.string().optional(),
-        country: z.string().optional(),
+      candidateTrials: z.array(z.object({
+        nctId: z.string(),
+        title: z.string().optional(),
         status: z.string().optional(),
-        contacts: z.array(z.object({
-          name: z.string().optional(),
-          phone: z.string().optional(),
-          email: z.string().optional(),
+        phase: z.string().optional(),
+        studyType: z.string().optional(),
+        condition: z.string().optional(),
+        intervention: z.string().optional(),
+        eligibilityCriteria: z.object({
+          inclusionCriteria: z.array(z.string()),
+          exclusionCriteria: z.array(z.string()),
+          minimumAge: z.string().optional(),
+          maximumAge: z.string().optional(),
+          gender: z.string().optional(),
+        }),
+        locations: z.array(z.object({
+          facility: z.string().optional(),
+          city: z.string().optional(),
+          state: z.string().optional(),
+          country: z.string().optional(),
+          status: z.string().optional(),
+          contacts: z.array(z.object({
+            name: z.string().optional(),
+            phone: z.string().optional(),
+            email: z.string().optional(),
+          })).default([]),
+        })),
+        contacts: z.object({
+          centralContact: z.string().optional(),
+          overallOfficial: z.string().optional(),
+        }).optional(),
+        urls: z.object({
+          clinicalTrialsGov: z.string().url(),
+          studyWebsite: z.string().url().optional(),
+        }),
+        lastUpdate: z.string().optional(),
+        enrollmentCount: z.number().optional(),
+        startDate: z.string().optional(),
+        completionDate: z.string().optional(),
+        literatureSupport: z.array(z.object({
+          pmid: z.string(),
+          title: z.string(),
+          authors: z.array(z.string()),
+          journal: z.string().optional(),
+          publicationDate: z.string().optional(),
+          url: z.string().url().optional(),
+          relevanceScore: z.number().min(0).max(1).optional(),
         })).default([]),
+        matchReasons: z.array(z.string()).default([]),
       })),
-      contacts: z.object({
-        centralContact: z.string().optional(),
-        overallOfficial: z.string().optional(),
-      }).optional(),
-      urls: z.object({
-        clinicalTrialsGov: z.string().url(),
-        studyWebsite: z.string().url().optional(),
+      searchMetadata: z.object({
+        searchTerms: z.array(z.string()),
+        totalTrialsFound: z.number(),
+        literatureQueries: z.array(z.string()),
+        executionTimeMs: z.number(),
+        apiCalls: z.object({
+          clinicalTrials: z.number(),
+          pubmed: z.number(),
+        }),
       }),
-      lastUpdate: z.string().optional(),
-      enrollmentCount: z.number().optional(),
-      startDate: z.string().optional(),
-      completionDate: z.string().optional(),
-      literatureSupport: z.array(z.object({
-        pmid: z.string(),
-        title: z.string(),
-        authors: z.array(z.string()),
-        journal: z.string().optional(),
-        publicationDate: z.string().optional(),
-        url: z.string().url().optional(),
-        relevanceScore: z.number().min(0).max(1).optional(),
-      })).default([]),
-      matchReasons: z.array(z.string()).default([]),
-    })),
+    }),
   }),
   outputSchema: z.object({
+    patientProfile: z.object({
+      diagnosis: z.string(),
+      diagnosisCode: z.string().optional(),
+      age: z.number().int().positive(),
+      medications: z.array(z.string()),
+      labValues: z.object({
+        hba1c: z.number().optional(),
+        egfr: z.number().optional(),
+        creatinine: z.number().optional(),
+        glucose: z.number().optional(),
+        cholesterol: z.number().optional(),
+        bloodPressure: z.object({
+          systolic: z.number().optional(),
+          diastolic: z.number().optional(),
+        }).optional(),
+      }),
+      comorbidities: z.array(z.string()).default([]),
+      location: z.string().optional(),
+      insurance: z.string().optional(),
+      recentHospitalization: z.boolean().default(false),
+      smokingHistory: z.string().optional(),
+      performanceStatus: z.string().optional(),
+      biomarkers: z.array(z.string()).default([]),
+      priorTreatments: z.array(z.string()).default([]),
+    }),
+    trialScoutResults: z.object({
+      patientProfile: z.object({
+        diagnosis: z.string(),
+        diagnosisCode: z.string().optional(),
+        age: z.number().int().positive(),
+        medications: z.array(z.string()),
+        labValues: z.object({
+          hba1c: z.number().optional(),
+          egfr: z.number().optional(),
+          creatinine: z.number().optional(),
+          glucose: z.number().optional(),
+          cholesterol: z.number().optional(),
+          bloodPressure: z.object({
+            systolic: z.number().optional(),
+            diastolic: z.number().optional(),
+          }).optional(),
+        }),
+        comorbidities: z.array(z.string()).default([]),
+        location: z.string().optional(),
+        insurance: z.string().optional(),
+        recentHospitalization: z.boolean().default(false),
+        smokingHistory: z.string().optional(),
+        performanceStatus: z.string().optional(),
+        biomarkers: z.array(z.string()).default([]),
+        priorTreatments: z.array(z.string()).default([]),
+      }),
+      candidateTrials: z.array(z.object({
+        nctId: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        phase: z.string().optional(),
+        studyType: z.string().optional(),
+        condition: z.string().optional(),
+        intervention: z.string().optional(),
+        eligibilityCriteria: z.object({
+          inclusionCriteria: z.array(z.string()),
+          exclusionCriteria: z.array(z.string()),
+          minimumAge: z.string().optional(),
+          maximumAge: z.string().optional(),
+          gender: z.string().optional(),
+        }),
+        locations: z.array(z.object({
+          facility: z.string().optional(),
+          city: z.string().optional(),
+          state: z.string().optional(),
+          country: z.string().optional(),
+          status: z.string().optional(),
+          contacts: z.array(z.object({
+            name: z.string().optional(),
+            phone: z.string().optional(),
+            email: z.string().optional(),
+          })).default([]),
+        })),
+        contacts: z.object({
+          centralContact: z.string().optional(),
+          overallOfficial: z.string().optional(),
+        }).optional(),
+        urls: z.object({
+          clinicalTrialsGov: z.string().url(),
+          studyWebsite: z.string().url().optional(),
+        }),
+        lastUpdate: z.string().optional(),
+        enrollmentCount: z.number().optional(),
+        startDate: z.string().optional(),
+        completionDate: z.string().optional(),
+        literatureSupport: z.array(z.object({
+          pmid: z.string(),
+          title: z.string(),
+          authors: z.array(z.string()),
+          journal: z.string().optional(),
+          publicationDate: z.string().optional(),
+          url: z.string().url().optional(),
+          relevanceScore: z.number().min(0).max(1).optional(),
+        })).default([]),
+        matchReasons: z.array(z.string()).default([]),
+      })),
+      searchMetadata: z.object({
+        searchTerms: z.array(z.string()),
+        totalTrialsFound: z.number(),
+        literatureQueries: z.array(z.string()),
+        executionTimeMs: z.number(),
+        apiCalls: z.object({
+          clinicalTrials: z.number(),
+          pubmed: z.number(),
+        }),
+      }),
+    }),
     eligibilityResults: z.object({
       patientProfile: z.object({
         diagnosis: z.string(),
@@ -495,7 +610,7 @@ const screenEligibility = createStep({
     const prompt = `Please assess the eligibility of this patient for the following clinical trials:
 
 Patient Profile: ${JSON.stringify(inputData.patientProfile, null, 2)}
-Candidate Trials: ${JSON.stringify(inputData.candidateTrials, null, 2)}
+Candidate Trials: ${JSON.stringify(inputData.trialScoutResults.candidateTrials, null, 2)}
 
 Please use the vectorQueryTool and openFdaDrugSafetyTool to assess eligibility and check for drug interactions.`;
 
@@ -511,59 +626,65 @@ Please use the vectorQueryTool and openFdaDrugSafetyTool to assess eligibility a
       resultText += chunk;
     }
 
-    // Mock eligibility results for development
-    const eligibilityResults = {
-      patientProfile: inputData.patientProfile,
-      eligibilityAssessments: [
-        {
-          nctId: 'NCT00000001',
-          title: 'Efficacy of New Diabetes Medication',
-          eligibilityStatus: 'ELIGIBLE' as const,
-          matchScore: 0.85,
-          inclusionMatches: ['Age eligible (55 years)', 'HbA1c within range (8.2%)', 'On metformin'],
-          exclusionConflicts: [],
-          ageEligibility: {
-            eligible: true,
-            reason: 'Patient age 55 falls within trial range 18-75',
-            patientAge: 55,
-            trialMinAge: '18',
-            trialMaxAge: '75',
+    // Parse the agent response to extract eligibility data
+    let eligibilityResults;
+    try {
+      // Try to parse JSON response from agent
+      const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        eligibilityResults = JSON.parse(jsonMatch[0]);
+      } else {
+        // If no JSON found, create a basic structure from the text response
+        eligibilityResults = {
+          patientProfile: inputData.patientProfile,
+          eligibilityAssessments: [],
+          summary: {
+            totalTrialsAssessed: inputData.trialScoutResults.candidateTrials.length,
+            eligibleTrials: 0,
+            potentiallyEligibleTrials: 0,
+            ineligibleTrials: 0,
+            requiresReviewTrials: 0,
+            averageMatchScore: 0,
+            topRecommendations: [],
+            safetyConcerns: [],
           },
-          drugInteractions: [],
-          locationEligibility: {
-            eligible: true,
-            reason: 'Patient location New York, NY matches trial locations',
-            availableLocations: ['New York, NY'],
+          metadata: {
+            executionTimeMs: 800,
+            drugInteractionChecks: 0,
+            eligibilityCriteriaEvaluated: 0,
           },
-          biomarkerEligibility: {
-            eligible: true,
-            reason: 'No specific biomarkers required',
-            requiredBiomarkers: [],
-            patientBiomarkers: [],
-          },
-          reasoning: 'Patient meets all inclusion criteria and has no exclusion conflicts',
-          recommendations: ['Patient appears eligible for this trial', 'Contact trial coordinator for enrollment'],
-          safetyFlags: [],
+        };
+        console.log("⚠️ Agent response could not be parsed as JSON, using empty results");
+      }
+    } catch (error) {
+      console.error("❌ Failed to parse agent response:", error);
+      // Fallback to empty results
+      eligibilityResults = {
+        patientProfile: inputData.patientProfile,
+        eligibilityAssessments: [],
+        summary: {
+          totalTrialsAssessed: inputData.trialScoutResults.candidateTrials.length,
+          eligibleTrials: 0,
+          potentiallyEligibleTrials: 0,
+          ineligibleTrials: 0,
+          requiresReviewTrials: 0,
+          averageMatchScore: 0,
+          topRecommendations: [],
+          safetyConcerns: [],
         },
-      ],
-      summary: {
-        totalTrialsAssessed: 1,
-        eligibleTrials: 1,
-        potentiallyEligibleTrials: 0,
-        ineligibleTrials: 0,
-        requiresReviewTrials: 0,
-        averageMatchScore: 0.85,
-        topRecommendations: ['NCT00000001'],
-        safetyConcerns: [],
-      },
-      metadata: {
-        executionTimeMs: 800,
-        drugInteractionChecks: 1,
-        eligibilityCriteriaEvaluated: 1,
-      },
-    };
+        metadata: {
+          executionTimeMs: 800,
+          drugInteractionChecks: 0,
+          eligibilityCriteriaEvaluated: 0,
+        },
+      };
+    }
 
-    return { eligibilityResults };
+    return { 
+      patientProfile: inputData.patientProfile,
+      trialScoutResults: inputData.trialScoutResults,
+      eligibilityResults 
+    };
   },
 });
 
@@ -795,84 +916,36 @@ const generateReport = createStep({
       }),
     }),
   }),
-  execute: async ({ inputData, mastra }) => {
-    const agent = mastra?.getAgent('summarizationAgent');
-    if (!agent) {
-      throw new Error('Summarization agent not found');
+  execute: async ({ inputData }) => {
+    const { patientProfile, trialScoutResults, eligibilityResults } = inputData;
+
+    if (!patientProfile) {
+      throw new Error('Patient profile is required to generate the clinical report');
     }
 
-    const prompt = `Please generate a comprehensive clinical report based on the following analysis:
-
-Patient Profile: ${JSON.stringify(inputData.patientProfile, null, 2)}
-Trial Scout Results: ${JSON.stringify(inputData.trialScoutResults, null, 2)}
-Eligibility Results: ${JSON.stringify(inputData.eligibilityResults, null, 2)}
-
-Please use the reportGeneratorTool to create a structured clinical report with recommendations.`;
-
-    const response = await agent.stream([
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ]);
-
-    let resultText = '';
-    for await (const chunk of response.textStream) {
-      resultText += chunk;
+    if (!trialScoutResults) {
+      throw new Error('Trial scout results are required to generate the clinical report');
     }
 
-    // Mock clinical report for development
-    const clinicalReport = {
-      patient_summary: `Patient Profile Summary:
-- Age: ${inputData.patientProfile.age} years
-- Primary Diagnosis: ${inputData.patientProfile.diagnosis}${inputData.patientProfile.diagnosisCode ? ` (${inputData.patientProfile.diagnosisCode})` : ''}
-- Current Medications: ${inputData.patientProfile.medications.join(', ') || 'None'}
-- Key Lab Values: HbA1c: ${inputData.patientProfile.labValues.hba1c}, eGFR: ${inputData.patientProfile.labValues.egfr}
-- Comorbidities: ${inputData.patientProfile.comorbidities.join(', ') || 'None'}
-- Location: ${inputData.patientProfile.location || 'Not specified'}`,
-      eligible_trials: [
-        {
-          nct_id: 'NCT00000001',
-          title: 'Efficacy of New Diabetes Medication',
-          match_score: 0.85,
-          eligibility_reasoning: 'Patient meets all inclusion criteria and has no exclusion conflicts',
-          literature_support: ['New Diabetes Treatment Approaches (Diabetes Research Journal, 2024-01-01)'],
-          contact_information: {
-            central_contact: 'Dr. Smith',
-            overall_official: 'Dr. Johnson',
-            locations: ['New York, NY'],
-          },
-          next_steps: ['Contact trial coordinator for enrollment', 'Schedule screening visit'],
-        },
-      ],
-      ineligible_trials: [],
-      recommendations: `Based on the comprehensive analysis, 1 clinical trial was identified as eligible for this patient.
+    if (!eligibilityResults) {
+      throw new Error('Eligibility results are required to generate the clinical report');
+    }
 
-Top Recommendations:
-1. Efficacy of New Diabetes Medication (NCT: NCT00000001) - Match Score: 85.0%
+    try {
+      const clinicalReport = await generateClinicalReport({
+        patientProfile,
+        trialScoutResults,
+        eligibilityResults,
+      });
 
-The patient appears to be a good candidate for clinical trial participation. Key factors supporting eligibility include:
-- Age-appropriate for identified trials
-- Diagnosis matches trial inclusion criteria
-- No major exclusion criteria conflicts identified
-- Available trial locations accessible to patient
-
-Next Steps:
-1. Review detailed eligibility assessments for each trial
-2. Contact trial coordinators for enrollment information
-3. Schedule additional screening if required
-4. Consider patient preferences and logistics`,
-      literature_support: ['New Diabetes Treatment Approaches (Diabetes Research Journal, 2024-01-01)'],
-      safety_flags: [],
-      workflow_metadata: {
-        execution_time_ms: 2300,
-        agents_activated: ['EMR_Analysis_Agent', 'Trial_Scout_Agent', 'Eligibility_Screener_Agent', 'Summarization_Agent'],
-        api_calls_made: 3,
-        confidence_score: 0.85,
-      },
-    };
-
-    return { clinicalReport };
+      return { clinicalReport };
+    } catch (error) {
+      console.error('Error generating clinical report:', error);
+      if (error instanceof Error) {
+        throw new Error(`Failed to generate clinical report: ${error.message}`);
+      }
+      throw error;
+    }
   },
 });
 
