@@ -129,7 +129,7 @@ export default function PatientForm() {
   const [tempInput, setTempInput] = useState("")
   const [diagnosisOpen, setDiagnosisOpen] = useState(false)
 
-  const totalSteps = 11 // Added one more step for results
+  const totalSteps = 12 // 0-10 form steps + 1 results step (0-11)
   const progress = ((currentStep + 1) / totalSteps) * 100
 
   const nextStep = () => {
@@ -226,14 +226,49 @@ export default function PatientForm() {
     return info.join(". ")
   }
 
+  // Export results functionality
+  const exportResults = () => {
+    if (!apiResponse?.data) return
+
+    const exportData = {
+      patientSummary: apiResponse.data.patientSummary,
+      clinicalTrials: apiResponse.data.matches.map(trial => ({
+        nctId: trial.id,
+        title: trial.title,
+        phase: trial.phase,
+        status: trial.status,
+        location: trial.location,
+        matchScore: `${Math.round(trial.matchScore * 100)}%`,
+        matchReason: trial.matchReason,
+        contactInfo: trial.contactInfo,
+        studyDetails: trial.studyDetails,
+        nextSteps: trial.nextSteps
+      })),
+      supportingEvidence: apiResponse.data.supportingEvidence,
+      generatedAt: new Date().toISOString()
+    }
+
+    const jsonString = JSON.stringify(exportData, null, 2)
+    const blob = new Blob([jsonString], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `clinical-trial-results-${new Date().toISOString().split('T')[0]}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   // Submit form data to API
   const submitForm = async () => {
     setIsLoading(true)
     setError(null)
-    
+
     try {
       const patientInfo = formatPatientInfo()
-      
+
       const payload = {
         patientInfo,
         demographics: {
@@ -256,14 +291,14 @@ export default function PatientForm() {
       })
 
       const result: ApiResponse = await response.json()
-      
+
       if (!result.success) {
         throw new Error(result.error || 'Failed to find trials')
       }
-      
+
       setApiResponse(result)
       nextStep() // Move to results step
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred')
     } finally {
@@ -873,10 +908,18 @@ export default function PatientForm() {
                       )}
 
                       <div className="pt-4 border-t">
-                        <Button className="w-full bg-teal-600 hover:bg-teal-700">
-                          View Full Trial Details
-                        </Button>
+                        <a
+                          href={`https://clinicaltrials.gov/ct2/show/${trial.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full"
+                        >
+                          <Button className="w-full bg-teal-600 hover:bg-teal-700">
+                            View Full Trial Details
+                          </Button>
+                        </a>
                       </div>
+
                     </div>
                   </CardContent>
                 </Card>
@@ -919,32 +962,6 @@ export default function PatientForm() {
               </Card>
             )}
 
-            {/* Metadata */}
-            <Card className="bg-muted/30">
-              <CardHeader>
-                <CardTitle className="text-lg">Processing Summary</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="font-medium">Processing Time</p>
-                    <p className="text-muted-foreground">{apiResponse.data.metadata.processingTime}ms</p>
-                  </div>
-                  <div>
-                    <p className="font-medium">Confidence Score</p>
-                    <p className="text-muted-foreground">{Math.round(apiResponse.data.metadata.confidenceScore * 100)}%</p>
-                  </div>
-                  <div>
-                    <p className="font-medium">API Calls</p>
-                    <p className="text-muted-foreground">{apiResponse.data.metadata.apiCallsMade}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium">Agents Used</p>
-                    <p className="text-muted-foreground">{apiResponse.data.metadata.agentsActivated.length}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
 
             {/* Action Buttons */}
             <div className="flex gap-4 justify-center">
@@ -978,7 +995,7 @@ export default function PatientForm() {
               >
                 Search for Another Patient
               </Button>
-              <Button className="bg-teal-600 hover:bg-teal-700">
+              <Button className="bg-teal-600 hover:bg-teal-700" onClick={exportResults}>
                 Export Results
               </Button>
             </div>
