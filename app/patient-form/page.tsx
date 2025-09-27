@@ -129,6 +129,8 @@ export default function PatientForm() {
 
   const [tempInput, setTempInput] = useState("")
   const [diagnosisOpen, setDiagnosisOpen] = useState(false)
+  const [customDiagnosis, setCustomDiagnosis] = useState("")
+  const [showCustomDiagnosis, setShowCustomDiagnosis] = useState(false)
 
   const totalSteps = 12 // 0-10 form steps + 1 results step (0-11)
   const progress = ((currentStep + 1) / totalSteps) * 100
@@ -266,13 +268,11 @@ export default function PatientForm() {
 
   // Submit form data to API
   const submitForm = async () => {
-    console.log('🚀 Form submission started');
     setIsLoading(true)
     setError(null)
 
     try {
       const patientInfo = formatPatientInfo()
-      console.log('📋 Formatted patient info:', patientInfo);
 
       const payload = {
         patientInfo,
@@ -287,8 +287,6 @@ export default function PatientForm() {
         }
       }
 
-      console.log('📤 Sending POST request to /api/find-trials with payload:', payload);
-
       const response = await fetch('/api/find-trials', {
         method: 'POST',
         headers: {
@@ -296,8 +294,6 @@ export default function PatientForm() {
         },
         body: JSON.stringify(payload)
       })
-
-      console.log('📥 Received response:', response.status, response.statusText);
 
       const result: ApiResponse = await response.json()
 
@@ -337,8 +333,7 @@ export default function PatientForm() {
             <CardHeader className="text-center">
               <CardTitle className="text-3xl mb-4">Let&apos;s find the right clinical trial</CardTitle>
               <p className="text-muted-foreground text-lg">
-                We&apos;ll ask you a few questions to match you with relevant clinical trials. This should take about 5
-                minutes.
+                We&apos;ll ask you a few questions about your patient to match them with clinical trials. This should take just a few minutes.
               </p>
             </CardHeader>
             <CardContent className="text-center pb-8">
@@ -380,6 +375,7 @@ export default function PatientForm() {
                             value={diagnosis}
                             onSelect={(currentValue) => {
                               setFormData((prev) => ({ ...prev, diagnosis: currentValue }))
+                              setShowCustomDiagnosis(false)
                               setDiagnosisOpen(false)
                             }}
                           >
@@ -392,11 +388,41 @@ export default function PatientForm() {
                             {diagnosis}
                           </CommandItem>
                         ))}
+                        <CommandItem
+                          value="Other"
+                          onSelect={() => {
+                            setShowCustomDiagnosis(true)
+                            setDiagnosisOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              showCustomDiagnosis ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          Other
+                        </CommandItem>
                       </CommandGroup>
                     </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
+              {showCustomDiagnosis && (
+                <div className="mt-4">
+                  <Label htmlFor="custom-diagnosis">Other primary diagnosis:</Label>
+                  <Input
+                    id="custom-diagnosis"
+                    value={customDiagnosis}
+                    onChange={(e) => {
+                      setCustomDiagnosis(e.target.value)
+                      setFormData((prev) => ({ ...prev, diagnosis: e.target.value }))
+                    }}
+                    placeholder="Type your diagnosis here"
+                    className="mt-2"
+                  />
+                </div>
+              )}
               <Button
                 onClick={nextStep}
                 disabled={!formData.diagnosis}
