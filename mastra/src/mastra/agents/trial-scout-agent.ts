@@ -3,7 +3,7 @@ import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
 import { clinicalTrialsApiTool, clinicalTrialDetailsTool } from '../tools/clinical-trials-api-tool';
-import { pubmedApiTool } from '../tools/pubmed-api-tool';
+import { enhancedPubMedApiTool as pubmedApiTool } from '../tools/enhanced-pubmed-api-tool';
 
 export const trialScoutAgent = new Agent({
   name: 'Trial Scout Agent',
@@ -34,7 +34,7 @@ export const trialScoutAgent = new Agent({
     - Always ask for patient profile information if not provided
     - Use the clinicalTrialsApiTool to search for relevant trials
     - Use the clinicalTrialDetailsTool to get detailed information for specific trials
-    - Use the pubmedApiTool to find supporting literature
+    - Use the enhancedPubMedApiTool to find supporting literature with real API integration
     - Provide clear match reasons for each recommendation
     - Keep responses concise but informative
 
@@ -112,7 +112,7 @@ export const trialScoutAgent = new Agent({
       }
     }
 
-    Use the clinicalTrialsApiTool, clinicalTrialDetailsTool, and pubmedApiTool to discover and analyze clinical trials.
+  Use the clinicalTrialsApiTool, clinicalTrialDetailsTool, and pubmedApiTool to discover and analyze clinical trials.
   `,
   model: openai('gpt-4o-mini'),
   tools: { clinicalTrialsApiTool, clinicalTrialDetailsTool, pubmedApiTool },

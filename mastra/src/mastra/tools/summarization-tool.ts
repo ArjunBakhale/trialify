@@ -198,6 +198,24 @@ export const reportGeneratorTool = createTool({
 
 export async function generateClinicalReport(input: SummarizationInput): Promise<ClinicalReport> {
   const { patientProfile, trialScoutResults, eligibilityResults } = input;
+  
+  // Validate required inputs
+  if (!patientProfile) {
+    throw new Error('Patient profile is required for clinical report generation');
+  }
+  
+  if (!trialScoutResults) {
+    throw new Error('Trial scout results are required for clinical report generation');
+  }
+  
+  if (!eligibilityResults) {
+    throw new Error('Eligibility results are required for clinical report generation');
+  }
+  
+  if (!eligibilityResults.eligibilityAssessments) {
+    throw new Error('Eligibility assessments are required for clinical report generation');
+  }
+  
   const patientAgeDisplay = typeof patientProfile.age === "number"
     ? `${patientProfile.age} years`
     : "Not specified";
@@ -223,10 +241,10 @@ Patient Profile Summary:
   `.trim();
 
   // Process eligible trials
-  const eligibleTrials = eligibilityResults.eligibilityAssessments
+  const eligibleTrials = (eligibilityResults.eligibilityAssessments || [])
     .filter(assessment => assessment.eligibilityStatus === "ELIGIBLE")
     .map(assessment => {
-      const trial = trialScoutResults.candidateTrials.find(t => t.nctId === assessment.nctId);
+      const trial = (trialScoutResults.candidateTrials || []).find(t => t.nctId === assessment.nctId);
       return {
         nct_id: assessment.nctId,
         title: assessment.title || trial?.title || 'Unknown Trial',
@@ -236,17 +254,24 @@ Patient Profile Summary:
         contact_information: {
           central_contact: trial?.contacts?.centralContact,
           overall_official: trial?.contacts?.overallOfficial,
-          locations: trial?.locations.map(loc => `${loc.facility}, ${loc.city}, ${loc.state}`).filter(Boolean) || [],
+          locations: trial?.locations?.map(loc => {
+            const parts = [];
+            if (loc.facility) parts.push(loc.facility);
+            if (loc.city) parts.push(loc.city);
+            if (loc.state) parts.push(loc.state);
+            if (loc.country) parts.push(loc.country);
+            return parts.length > 0 ? parts.join(', ') : 'Location not specified';
+          }).filter(loc => loc !== 'Location not specified') || [],
         },
         next_steps: assessment.recommendations,
       };
     });
 
   // Process ineligible trials
-  const ineligibleTrials = eligibilityResults.eligibilityAssessments
+  const ineligibleTrials = (eligibilityResults.eligibilityAssessments || [])
     .filter(assessment => assessment.eligibilityStatus === "INELIGIBLE")
     .map(assessment => {
-      const trial = trialScoutResults.candidateTrials.find(t => t.nctId === assessment.nctId);
+      const trial = (trialScoutResults.candidateTrials || []).find(t => t.nctId === assessment.nctId);
       return {
         nct_id: assessment.nctId,
         title: assessment.title || trial?.title || 'Unknown Trial',
@@ -285,22 +310,22 @@ Next Steps:
   `.trim();
 
   // Collect literature support
-  const literatureSupport = trialScoutResults.candidateTrials
-    .flatMap(trial => trial.literatureSupport)
+  const literatureSupport = (trialScoutResults.candidateTrials || [])
+    .flatMap(trial => trial.literatureSupport || [])
     .map(lit => `${lit.title} (${lit.journal || 'Unknown Journal'}, ${lit.publicationDate || 'Unknown Date'})`)
     .slice(0, 10); // Limit to top 10
 
   // Collect safety flags
-  const safetyFlags = eligibilityResults.eligibilityAssessments
-    .flatMap(assessment => assessment.safetyFlags)
+  const safetyFlags = (eligibilityResults.eligibilityAssessments || [])
+    .flatMap(assessment => assessment.safetyFlags || [])
     .filter((flag, index, array) => array.indexOf(flag) === index); // Remove duplicates
 
   // Calculate workflow metadata
-  const totalExecutionTime = trialScoutResults.searchMetadata.executionTimeMs + 
-                            eligibilityResults.metadata.executionTimeMs;
-  const totalApiCalls = trialScoutResults.searchMetadata.apiCalls.clinicalTrials + 
-                       trialScoutResults.searchMetadata.apiCalls.pubmed +
-                       eligibilityResults.metadata.drugInteractionChecks;
+  const totalExecutionTime = (trialScoutResults.searchMetadata?.executionTimeMs || 0) + 
+                            (eligibilityResults.metadata?.executionTimeMs || 0);
+  const totalApiCalls = (trialScoutResults.searchMetadata?.apiCalls?.clinicalTrials || 0) + 
+                       (trialScoutResults.searchMetadata?.apiCalls?.pubmed || 0) +
+                       (eligibilityResults.metadata?.drugInteractionChecks || 0);
   const confidenceScore = eligibleTrials.length > 0 ? 
     eligibleTrials.reduce((sum, trial) => sum + trial.match_score, 0) / eligibleTrials.length : 0;
 
