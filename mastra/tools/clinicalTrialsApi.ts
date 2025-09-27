@@ -2,35 +2,35 @@ import { createTool } from "@mastra/core";
 import { z } from "zod";
 
 /**
- * ClinicalTrials.gov API v2 Integration Tools
- * 
- * Implements evidence-driven trial discovery following design principles:
- * - Patient-Centric Accuracy: Precise matching based on medical conditions
- * - Performance Discipline: Cached expensive lookups, targeted queries
- * - Compliance: Structured data handling for clinical safety
+ * ClinicalTrials.gov API v2 integration.
+ * Implements evidence-driven trial discovery aligned with the design principles.
  */
 
-// Zod schemas for structured outputs
-const TrialLocationSchema = z.object({
-  facility: z.string(),
-  city: z.string(),
+// -----------------------------
+// Shared Zod Schemas
+// -----------------------------
+export const TrialLocationSchema = z.object({
+  facility: z.string().optional(),
+  city: z.string().optional(),
   state: z.string().optional(),
-  country: z.string(),
-  status: z.string(),
-  contacts: z.array(z.object({
-    name: z.string().optional(),
-    phone: z.string().optional(),
-    email: z.string().optional(),
-  })).optional(),
+  country: z.string().optional(),
+  status: z.string().optional(),
+  contacts: z.array(
+    z.object({
+      name: z.string().optional(),
+      phone: z.string().optional(),
+      email: z.string().optional(),
+    })
+  ).default([]),
 });
 
-const TrialSchema = z.object({
+export const TrialSchema = z.object({
   nctId: z.string(),
-  title: z.string(),
-  status: z.string(),
+  title: z.string().optional(),
+  status: z.string().optional(),
   phase: z.string().optional(),
-  studyType: z.string(),
-  condition: z.string(),
+  studyType: z.string().optional(),
+  condition: z.string().optional(),
   intervention: z.string().optional(),
   eligibilityCriteria: z.object({
     inclusionCriteria: z.array(z.string()),
@@ -45,239 +45,256 @@ const TrialSchema = z.object({
     overallOfficial: z.string().optional(),
   }).optional(),
   urls: z.object({
-    clinicalTrialsGov: z.string(),
-    studyWebsite: z.string().optional(),
+    clinicalTrialsGov: z.string().url(),
+    studyWebsite: z.string().url().optional(),
   }),
-  lastUpdate: z.string(),
+  lastUpdate: z.string().optional(),
   enrollmentCount: z.number().optional(),
   startDate: z.string().optional(),
   completionDate: z.string().optional(),
 });
 
-const ClinicalTrialsResponseSchema = z.object({
+export const ClinicalTrialsResponseSchema = z.object({
   trials: z.array(TrialSchema),
   totalCount: z.number(),
   queryMetadata: z.object({
     searchTerms: z.string(),
     filters: z.record(z.any()),
-    executionTime: z.number(),
+    executionTimeMs: z.number(),
   }),
 });
 
-/**
- * Primary Clinical Trials Search Tool
- * Cross-references multiple conditions and applies intelligent filtering
- */
-export const clinicalTrialsSearchTool = createTool({
+const TrialDetailsResponseSchema = z.object({
+  trials: z.array(z.any()),
+  fetchedCount: z.number(),
+  requestedCount: z.number(),
+});
+
+const buildQueryTerms = (primary: string, secondary: string[] = []) => {
+  const terms = [primary.trim(), ...secondary.map((term) => term.trim())].filter(Boolean);
+  return terms.length > 0 ? terms.join(" OR ") : primary;
+};
+
+const mapEligibilityCriteria = (raw: string) => {
+  if (!raw) {
+    return { inclusionCriteria: [], exclusionCriteria: [] };
+  }
+
+  const normalised = raw.replace(/\r/g, "").trim();
+  const [inclusionBlockRaw, exclusionBlockRaw] = normalised
+    .split(/Exclusion Criteria:/i)
+    .map((section) => section?.trim() ?? "");
+
+  const inclusionBlock = inclusionBlockRaw.split(/Inclusion Criteria:/i)[1] ?? inclusionBlockRaw;
+  const inclusionCriteria = inclusionBlock
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-•]\s*/, "").trim())
+    .filter(Boolean);
+
+  const exclusionCriteria = exclusionBlockRaw
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-•]\s*/, "").trim())
+    .filter(Boolean);
+
+  return { inclusionCriteria, exclusionCriteria };
+};
+
+const mapStudyLocations = (study: any) => {
+  const rawLocations = study?.protocolSection?.contactsLocationsModule?.locations ?? [];
+  return rawLocations.map((location: any) => ({
+    facility: location?.facility ?? undefined,
+    city: location?.city ?? undefined,
+    state: location?.state ?? undefined,
+    country: location?.country ?? undefined,
+    status: location?.status ?? undefined,
+    contacts: (location?.contacts ?? []).map((contact: any) => ({
+      name: contact?.name ?? undefined,
+      phone: contact?.phone ?? undefined,
+      email: contact?.email ?? undefined,
+    })),
+  }));
+};
+
+// -----------------------------
+// ClinicalTrials.gov Search Tool
+// -----------------------------
+export const clinicalTrialsApiTool = createTool({
   id: "clinicalTrialsSearch",
-  description: "Search ClinicalTrials.gov for relevant trials with advanced filtering and location matching",
+  description:
+    "Search ClinicalTrials.gov for relevant trials with condition, status, and proximity filters.",
   inputSchema: z.object({
-    condition: z.string().describe("Primary medical condition or disease"),
-    secondaryConditions: z.array(z.string()).optional().describe("Additional conditions or comorbidities"),
-    age: z.number().optional().describe("Patient age in years"),
+    condition: z.string().min(1, "Condition is required"),
+    secondaryConditions: z.array(z.string()).optional(),
+    age: z.number().int().positive().optional(),
     gender: z.enum(["All", "Male", "Female"]).default("All"),
-    status: z.array(z.enum(["RECRUITING", "ACTIVE_NOT_RECRUITING", "ENROLLING_BY_INVITATION", "COMPLETED", "SUSPENDED", "TERMINATED", "WITHDRAWN"]))
+    status: z
+      .array(
+        z.enum([
+          "RECRUITING",
+          "ACTIVE_NOT_RECRUITING",
+          "ENROLLING_BY_INVITATION",
+          "COMPLETED",
+          "SUSPENDED",
+          "TERMINATED",
+          "WITHDRAWN",
+        ])
+      )
       .default(["RECRUITING", "ACTIVE_NOT_RECRUITING"]),
-    location: z.string().optional().describe("Patient location (city, state) for proximity matching"),
-    locationRadius: z.number().default(100).describe("Search radius in miles from patient location"),
-    phase: z.array(z.string()).optional().describe("Clinical trial phases (e.g., ['Phase 2', 'Phase 3'])"),
-    interventionType: z.array(z.string()).optional().describe("Types of interventions (Drug, Device, Behavioral, etc.)"),
-    maxResults: z.number().default(20).describe("Maximum number of trials to return"),
+    location: z.string().optional(),
+    locationRadius: z.number().default(100),
+    phase: z.array(z.string()).optional(),
+    interventionType: z.array(z.string()).optional(),
+    maxResults: z.number().default(20),
     sortBy: z.enum(["relevance", "lastUpdate", "enrollmentCount", "startDate"]).default("relevance"),
   }),
-  execute: async (context) => {
-    const { 
-      condition, 
-      secondaryConditions = [], 
-      age, 
-      gender = "All", 
-      status, 
-      location, 
-      locationRadius = 100,
-      phase,
-      interventionType,
-      maxResults = 20,
-      sortBy = "relevance"
-    } = context.input;
+  outputSchema: ClinicalTrialsResponseSchema,
+  execute: async (ctx) => {
+    const {
+      context: {
+        condition,
+        secondaryConditions = [],
+        age,
+        gender = "All",
+        status,
+        location,
+        locationRadius = 100,
+        phase,
+        interventionType,
+        maxResults = 20,
+        sortBy = "relevance",
+      },
+    } = ctx;
+
     const startTime = Date.now();
-    
+    const baseUrl = "https://clinicaltrials.gov/api/v2/studies";
+
+    const params = new URLSearchParams({
+      format: "json",
+      pageSize: String(maxResults),
+      sortBy,
+    });
+
+    params.append("query.cond", buildQueryTerms(condition, secondaryConditions));
+
+    if (status?.length) {
+      params.append("query.recr", status.join(","));
+    }
+
+    if (age !== undefined) {
+      const bucket = age < 18 ? "Child" : age >= 65 ? "Older Adult" : "Adult";
+      params.append("query.age", bucket);
+    }
+
+    if (gender !== "All") {
+      params.append("query.gndr", gender);
+    }
+
+    if (location) {
+      params.append("query.locn", location);
+      params.append("distance", String(locationRadius));
+    }
+
+    if (phase?.length) {
+      params.append("query.phase", phase.join(","));
+    }
+
+    if (interventionType?.length) {
+      params.append("query.intr", interventionType.join(","));
+    }
+
     try {
-      const baseUrl = "https://clinicaltrials.gov/api/v2/studies";
-      
-      // Build comprehensive query parameters
-      const params = new URLSearchParams({
-        format: "json",
-        pageSize: maxResults.toString(),
-        sortBy: sortBy,
-      });
-      
-      // Primary condition search
-      let queryTerms = [condition];
-      if (secondaryConditions.length > 0) {
-        queryTerms = queryTerms.concat(secondaryConditions);
-      }
-      params.append("query.cond", queryTerms.join(" OR "));
-      
-      // Recruitment status filter
-      if (status.length > 0) {
-        params.append("query.recr", status.join(","));
-      }
-      
-      // Age filtering
-      if (age !== undefined) {
-        // Convert age to appropriate age group
-        if (age < 18) {
-          params.append("query.age", "Child");
-        } else if (age >= 65) {
-          params.append("query.age", "Older Adult");
-        } else {
-          params.append("query.age", "Adult");
-        }
-      }
-      
-      // Gender filtering
-      if (gender !== "All") {
-        params.append("query.gndr", gender);
-      }
-      
-      // Location proximity search
-      if (location) {
-        params.append("query.locn", location);
-        params.append("distance", locationRadius.toString());
-      }
-      
-      // Phase filtering
-      if (phase && phase.length > 0) {
-        params.append("query.phase", phase.join(","));
-      }
-      
-      // Intervention type filtering
-      if (interventionType && interventionType.length > 0) {
-        params.append("query.intr", interventionType.join(","));
-      }
-      
-      console.log(`🔍 Searching ClinicalTrials.gov: ${queryTerms.join(", ")}`);
-      
-      // Execute API request with error handling
-      const response = await fetch(`${baseUrl}?${params}`, {
+      const response = await fetch(`${baseUrl}?${params.toString()}`, {
         headers: {
           "User-Agent": "Trialify-Clinical-Navigator/1.0",
-          "Accept": "application/json",
+          Accept: "application/json",
         },
-        // Add timeout to prevent hanging requests
         signal: AbortSignal.timeout(15000),
       });
-      
+
       if (!response.ok) {
         throw new Error(`ClinicalTrials.gov API error: ${response.status} ${response.statusText}`);
       }
-      
+
       const data = await response.json();
-      const executionTime = Date.now() - startTime;
-      
-      // Transform API response to structured format
-      const trials = (data.studies || []).map((study: any) => {
-        // Parse eligibility criteria
-        const eligibilityText = study.protocolSection?.eligibilityModule?.eligibilityCriteria || "";
-        const inclusionMatch = eligibilityText.match(/Inclusion Criteria:(.*?)(?=Exclusion Criteria:|$)/s);
-        const exclusionMatch = eligibilityText.match(/Exclusion Criteria:(.*?)$/s);
-        
-        const inclusionCriteria = inclusionMatch 
-          ? inclusionMatch[1].trim().split(/\n\s*[-•]\s*/).filter(Boolean)
-          : [];
-        const exclusionCriteria = exclusionMatch 
-          ? exclusionMatch[1].trim().split(/\n\s*[-•]\s*/).filter(Boolean)
-          : [];
-        
-        // Parse locations
-        const locations = (study.protocolSection?.contactsLocationsModule?.locations || []).map((loc: any) => ({
-          facility: loc.facility || "Unknown Facility",
-          city: loc.city || "",
-          state: loc.state || "",
-          country: loc.country || "Unknown",
-          status: loc.status || "Unknown",
-          contacts: (loc.contacts || []).map((contact: any) => ({
-            name: contact.name,
-            phone: contact.phone,
-            email: contact.email,
-          })),
-        }));
-        
+      const studies = data?.studies ?? [];
+
+      const trials = studies.map((study: any) => {
+        const rawEligibility = study?.protocolSection?.eligibilityModule?.eligibilityCriteria ?? "";
+        const { inclusionCriteria, exclusionCriteria } = mapEligibilityCriteria(rawEligibility);
+
         return {
-          nctId: study.protocolSection?.identificationModule?.nctId || "",
-          title: study.protocolSection?.identificationModule?.briefTitle || "",
-          status: study.protocolSection?.statusModule?.overallStatus || "",
-          phase: study.protocolSection?.designModule?.phases?.[0] || undefined,
-          studyType: study.protocolSection?.designModule?.studyType || "",
-          condition: study.protocolSection?.conditionsModule?.conditions?.[0] || condition,
-          intervention: study.protocolSection?.armsInterventionsModule?.interventions?.[0]?.name,
+          nctId: study?.protocolSection?.identificationModule?.nctId ?? "",
+          title: study?.protocolSection?.identificationModule?.briefTitle ?? undefined,
+          status: study?.protocolSection?.statusModule?.overallStatus ?? undefined,
+          phase: study?.protocolSection?.designModule?.phases?.[0] ?? undefined,
+          studyType: study?.protocolSection?.designModule?.studyType ?? undefined,
+          condition: study?.protocolSection?.conditionsModule?.conditions?.[0] ?? condition,
+          intervention: study?.protocolSection?.armsInterventionsModule?.interventions?.[0]?.name ?? undefined,
           eligibilityCriteria: {
             inclusionCriteria,
             exclusionCriteria,
-            minimumAge: study.protocolSection?.eligibilityModule?.minimumAge,
-            maximumAge: study.protocolSection?.eligibilityModule?.maximumAge,
-            gender: study.protocolSection?.eligibilityModule?.sex,
+            minimumAge: study?.protocolSection?.eligibilityModule?.minimumAge ?? undefined,
+            maximumAge: study?.protocolSection?.eligibilityModule?.maximumAge ?? undefined,
+            gender: study?.protocolSection?.eligibilityModule?.sex ?? undefined,
           },
-          locations,
+          locations: mapStudyLocations(study),
           contacts: {
-            centralContact: study.protocolSection?.contactsLocationsModule?.centralContacts?.[0]?.name,
-            overallOfficial: study.protocolSection?.contactsLocationsModule?.overallOfficials?.[0]?.name,
+            centralContact:
+              study?.protocolSection?.contactsLocationsModule?.centralContacts?.[0]?.name ?? undefined,
+            overallOfficial:
+              study?.protocolSection?.contactsLocationsModule?.overallOfficials?.[0]?.name ?? undefined,
           },
           urls: {
-            clinicalTrialsGov: `https://clinicaltrials.gov/study/${study.protocolSection?.identificationModule?.nctId}`,
-            studyWebsite: study.protocolSection?.identificationModule?.secondaryIdInfos?.find((id: any) => id.type === "Other")?.id,
+            clinicalTrialsGov: `https://clinicaltrials.gov/study/${study?.protocolSection?.identificationModule?.nctId}`,
+            studyWebsite:
+              study?.protocolSection?.identificationModule?.secondaryIdInfos?.find(
+                (id: any) => id?.type === "Other"
+              )?.id ?? undefined,
           },
-          lastUpdate: study.protocolSection?.statusModule?.lastUpdateSubmitDate || "",
-          enrollmentCount: study.protocolSection?.designModule?.enrollmentInfo?.count,
-          startDate: study.protocolSection?.statusModule?.startDateStruct?.date,
-          completionDate: study.protocolSection?.statusModule?.completionDateStruct?.date,
+          lastUpdate: study?.protocolSection?.statusModule?.lastUpdateSubmitDate ?? undefined,
+          enrollmentCount: study?.protocolSection?.designModule?.enrollmentInfo?.count ?? undefined,
+          startDate: study?.protocolSection?.statusModule?.startDateStruct?.date ?? undefined,
+          completionDate: study?.protocolSection?.statusModule?.completionDateStruct?.date ?? undefined,
         };
       });
-      
-      console.log(`✅ Found ${trials.length} trials in ${executionTime}ms`);
-      
+
       return ClinicalTrialsResponseSchema.parse({
         trials,
-        totalCount: data.totalCount || 0,
+        totalCount: data?.totalCount ?? trials.length,
         queryMetadata: {
-          searchTerms: queryTerms.join(", "),
+          searchTerms: buildQueryTerms(condition, secondaryConditions),
           filters: {
-            status: status,
-            location: location,
-            age: age,
-            phase: phase,
-            interventionType: interventionType,
+            status,
+            location,
+            age,
+            phase,
+            interventionType,
           },
-          executionTime,
+          executionTimeMs: Date.now() - startTime,
         },
       });
-      
     } catch (error) {
-      console.error("❌ ClinicalTrials.gov search failed:", error);
-      
-      // Return mock data in development/error scenarios
-      if (process.env.MASTRA_MOCK_MODE === "true" || error instanceof TypeError) {
-        console.log("🎭 Returning mock clinical trials data");
+      if (process.env.MASTRA_MOCK_MODE === "true") {
         return ClinicalTrialsResponseSchema.parse({
           trials: [
             {
-              nctId: "NCT05123456",
-              title: "Phase 3 Study of Novel Diabetes Treatment",
+              nctId: "NCT00000000",
+              title: "Mock Trial for Offline Demo",
               status: "RECRUITING",
               phase: "Phase 3",
               studyType: "Interventional",
-              condition: condition,
-              intervention: "Investigational Drug XYZ",
+              condition,
+              intervention: "Investigational Therapy X",
               eligibilityCriteria: {
                 inclusionCriteria: [
-                  "Adults 18-75 years with Type 2 Diabetes",
-                  "HbA1c between 7.0-10.5%",
-                  "Stable metformin dose for 3 months"
+                  "Adults aged 18-75",
+                  "Confirmed diagnosis matching query condition",
+                  "Stable first-line therapy for ≥3 months",
                 ],
                 exclusionCriteria: [
-                  "Pregnancy or nursing",
-                  "Severe renal impairment (eGFR <30)",
-                  "Active malignancy"
+                  "Pregnancy or breastfeeding",
+                  "Severe renal impairment",
+                  "Recent participation in conflicting trial",
                 ],
                 minimumAge: "18 Years",
                 maximumAge: "75 Years",
@@ -285,93 +302,122 @@ export const clinicalTrialsSearchTool = createTool({
               },
               locations: [
                 {
-                  facility: "Atlanta Clinical Research Center",
+                  facility: "Mock Clinical Research Center",
                   city: "Atlanta",
                   state: "GA",
-                  country: "United States",
+                  country: "USA",
                   status: "RECRUITING",
                   contacts: [
                     {
-                      name: "Dr. Sarah Johnson",
-                      phone: "404-555-0123",
-                      email: "research@atlantacrc.com"
-                    }
+                      name: "Dr. Demo Researcher",
+                      phone: "404-555-1000",
+                      email: "demo@trialify.health",
+                    },
                   ],
-                }
+                },
               ],
               contacts: {
-                centralContact: "Clinical Trial Coordinator",
-                overallOfficial: "Dr. Michael Chen, MD",
+                centralContact: "Trial Navigator Desk",
+                overallOfficial: "Dr. Principal Investigator",
               },
               urls: {
-                clinicalTrialsGov: "https://clinicaltrials.gov/study/NCT05123456",
+                clinicalTrialsGov: "https://clinicaltrials.gov/study/NCT00000000",
               },
-              lastUpdate: "2024-09-15",
-              enrollmentCount: 300,
-              startDate: "2024-01-15",
-              completionDate: "2025-12-31",
-            }
+              lastUpdate: new Date().toISOString(),
+              enrollmentCount: 150,
+              startDate: "2024-01-01",
+              completionDate: "2026-12-31",
+            },
           ],
           totalCount: 1,
           queryMetadata: {
-            searchTerms: condition,
-            filters: { status, location, age },
-            executionTime: Date.now() - startTime,
+            searchTerms: buildQueryTerms(condition, secondaryConditions),
+            filters: {
+              status,
+              location,
+              age,
+              phase,
+              interventionType,
+            },
+            executionTimeMs: Date.now() - startTime,
           },
         });
       }
-      
+
+      console.error("ClinicalTrials.gov search failed", error);
       throw error;
     }
-  }
+  },
 });
 
-/**
- * Trial Details Retrieval Tool
- * Fetches comprehensive details for specific NCT IDs
- */
+// -----------------------------
+// ClinicalTrials.gov Detail Tool
+// -----------------------------
 export const clinicalTrialDetailsTool = createTool({
-  name: "clinicalTrialDetails",
-  description: "Retrieve detailed information for specific clinical trial NCT IDs",
+  id: "clinicalTrialDetails",
+  description: "Retrieve detailed information for specific ClinicalTrials.gov NCT IDs.",
   inputSchema: z.object({
-    nctIds: z.array(z.string()).describe("Array of NCT IDs to fetch details for"),
-    includeResults: z.boolean().default(false).describe("Include published trial results if available"),
+    nctIds: z.array(z.string().min(1)).min(1, "Provide at least one NCT ID"),
+    includeResults: z.boolean().default(false),
   }),
-  execute: async ({ nctIds, includeResults = false }) => {
+  outputSchema: TrialDetailsResponseSchema,
+  execute: async (ctx) => {
+    const {
+      context: { nctIds, includeResults = false },
+    } = ctx;
+
+    const baseUrl = "https://clinicaltrials.gov/api/v2/studies";
+    const params = new URLSearchParams({
+      format: "json",
+      pageSize: String(nctIds.length),
+      query: nctIds.map((id) => `NCT_ID:${id}`).join(" OR "),
+    });
+
+    if (includeResults) {
+      params.append(
+        "fields",
+        "NCTId,BriefTitle,DetailedDescription,Condition,InterventionName,Phase,StudyType,OverallStatus,StartDate,CompletionDate,EnrollmentCount,EligibilityCriteria,Location,ResultsFirstSubmitDate,HasResults"
+      );
+    }
+
     try {
-      const baseUrl = "https://clinicaltrials.gov/api/v2/studies";
-      const params = new URLSearchParams({
-        query: nctIds.map(id => `NCT_ID:${id}`).join(" OR "),
-        format: "json",
-        pageSize: nctIds.length.toString(),
+      const response = await fetch(`${baseUrl}?${params.toString()}`, {
+        headers: {
+          "User-Agent": "Trialify-Clinical-Navigator/1.0",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(15000),
       });
-      
-      if (includeResults) {
-        params.append("fields", "NCTId,BriefTitle,DetailedDescription,Condition,InterventionName,Phase,StudyType,OverallStatus,StartDate,CompletionDate,EnrollmentCount,EligibilityCriteria,Location,ResultsFirstSubmitDate,HasResults");
+
+      if (!response.ok) {
+        throw new Error(`ClinicalTrials.gov API error: ${response.status} ${response.statusText}`);
       }
-      
-      const response = await fetch(`${baseUrl}?${params}`);
+
       const data = await response.json();
-      
-      return {
-        trials: data.studies || [],
-        fetchedCount: (data.studies || []).length,
+      const trials = data?.studies ?? [];
+
+      return TrialDetailsResponseSchema.parse({
+        trials,
+        fetchedCount: trials.length,
         requestedCount: nctIds.length,
-      };
-      
+      });
     } catch (error) {
-      console.error("❌ Trial details fetch failed:", error);
+      if (process.env.MASTRA_MOCK_MODE === "true") {
+        return TrialDetailsResponseSchema.parse({
+          trials: [
+            {
+              nctId: nctIds[0],
+              mock: true,
+              description: "Offline mock trial details payload",
+            },
+          ],
+          fetchedCount: 1,
+          requestedCount: nctIds.length,
+        });
+      }
+
+      console.error("ClinicalTrials.gov detail lookup failed", error);
       throw error;
     }
-  }
+  },
 });
-
-/**
- * Export all clinical trials API tools
- */
-export {
-  clinicalTrialsSearchTool,
-  clinicalTrialDetailsTool,
-  TrialSchema,
-  ClinicalTrialsResponseSchema,
-};

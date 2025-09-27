@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.38",
     "@mastra/core": "^0.18.0",
     "@mastra/memory": "^0.15.3",
     "@mastra/rag": "^1.2.6",

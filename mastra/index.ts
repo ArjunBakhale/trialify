@@ -1,9 +1,10 @@
 import { Mastra } from "@mastra/core";
-import { emrAnalysisAgent } from "./agents/emrAnalysisAgent";
-import { trialScoutAgent } from "./agents/trialScoutAgent";
-import { eligibilityScreenerAgent } from "./agents/eligibilityScreenerAgent";
-import { summarizationAgent } from "./agents/summarizationAgent";
-import { clinicalTrialWorkflow } from "./workflows/clinicalTrialWorkflow";
+import { ConsoleLogger, LogLevel } from "@mastra/core/logger";
+import { emrAnalysisAgent, analyzePatientEMR } from "./agents/emrAnalysisAgent";
+import { trialScoutAgent, scoutClinicalTrials } from "./agents/trialScoutAgent";
+import { eligibilityScreenerAgent, screenEligibility } from "./agents/eligibilityScreenerAgent";
+import { summarizationAgent, generateClinicalReport, suspendForPhysicianReview } from "./agents/summarizationAgent";
+import { clinicalTrialWorkflow, executeClinicalTrialWorkflow, watchClinicalTrialWorkflow, workflowUtils } from "./workflows/clinicalTrialWorkflow";
 
 /**
  * Main Mastra Configuration for Clinical Trial Navigator
@@ -18,6 +19,25 @@ import { clinicalTrialWorkflow } from "./workflows/clinicalTrialWorkflow";
  * - Human-in-the-Loop Assurance: Workflow suspension for clinician review
  * - Operational Observability: Real-time monitoring via .watch() hooks
  */
+const resolveMastraLogLevel = (value?: string | null): LogLevel => {
+  switch (value?.toLowerCase()) {
+    case "debug":
+      return LogLevel.DEBUG;
+    case "warn":
+      return LogLevel.WARN;
+    case "error":
+      return LogLevel.ERROR;
+    case "silent":
+    case "none":
+      return LogLevel.NONE;
+    case "info":
+    default:
+      return process.env.NODE_ENV === "production" && process.env.MASTRA_DEV !== "true"
+        ? LogLevel.WARN
+        : LogLevel.INFO;
+  }
+};
+
 export const mastra = new Mastra({
   /**
    * Agent Registry - 4-Agent Clinical Trial Matching Pipeline
@@ -71,98 +91,61 @@ export const mastra = new Mastra({
   },
 
   /**
-   * Memory Configuration for RAG Pipeline
-   * Phase 1: In-memory adapter for demo (low setup friction)
-   * Future: Migrate to Supabase pgvector for production persistence
-   */
-  memory: {
-    provider: "in-memory",
-    config: {
-      // Eligibility criteria vector store configuration
-      vectorDimensions: 1536, // OpenAI ada-002 embedding dimensions
-      similarityThreshold: 0.8, // High threshold for clinical safety
-      maxResults: 10, // Limit candidate trials for performance
-    }
-  },
-
-  /**
    * Logging Configuration
-   * Operational Observability: Meaningful telemetry for each agent activation
+   * Uses Mastra ConsoleLogger to ensure compatibility with internal telemetry
    */
-  logger: {
-    level: process.env.MASTRA_LOG_LEVEL || "info",
-    format: "json", // Structured logging for production monitoring
-  },
-
-  /**
-   * Performance Configuration
-   * Performance Discipline: Target sub-10 second end-to-end execution
-   */
-  performance: {
-    timeout: 30000, // 30 second max execution time
-    retries: 2, // Retry failed API calls
-    concurrency: 3, // Allow parallel tool execution where possible
-  },
-
-  /**
-   * Security Configuration
-   * Compliance: Secure handling of sensitive patient data
-   */
-  security: {
-    // Avoid unnecessary persistence of sensitive data
-    persistSensitiveData: false,
-    // Encrypt data in transit
-    encryptionEnabled: true,
-  },
+  logger: new ConsoleLogger({
+    name: "MastraClinicalTrialNavigator",
+    level: resolveMastraLogLevel(process.env.MASTRA_LOG_LEVEL ?? null),
+  }),
 });
 
 /**
  * Export individual components for testing and development
  */
 export {
+  // Agents
   emrAnalysisAgent,
   trialScoutAgent,
   eligibilityScreenerAgent,
   summarizationAgent,
+  
+  // Workflows
   clinicalTrialWorkflow,
+  
+  // Utility functions
+  analyzePatientEMR,
+  scoutClinicalTrials,
+  screenEligibility,
+  generateClinicalReport,
+  suspendForPhysicianReview,
+  executeClinicalTrialWorkflow,
+  watchClinicalTrialWorkflow,
+  workflowUtils,
 };
 
 /**
- * Utility function for workflow execution with error handling
+ * Legacy utility function for workflow execution with error handling
+ * @deprecated Use executeClinicalTrialWorkflow from workflowUtils instead
  */
 export async function executeTrialMatchingWorkflow(
   patientData: string,
   demographics?: { age?: number; location?: string }
 ) {
-  try {
-    console.log("🚀 Starting Clinical Trial Navigator workflow...");
-    
-    const result = await mastra.workflow("clinicalTrialWorkflow").execute({
-      patientData,
-      demographics,
-    });
-
-    console.log("✅ Workflow completed successfully");
-    return result;
-  } catch (error) {
-    console.error("❌ Workflow execution failed:", error);
-    throw error;
-  }
+  console.warn("⚠️ executeTrialMatchingWorkflow is deprecated. Use executeClinicalTrialWorkflow instead.");
+  return executeClinicalTrialWorkflow(patientData, demographics);
 }
 
 /**
- * Utility function for real-time workflow monitoring
+ * Legacy utility function for real-time workflow monitoring
+ * @deprecated Use watchClinicalTrialWorkflow from workflowUtils instead
  */
 export function watchTrialMatchingWorkflow(
   patientData: string,
   demographics?: { age?: number; location?: string }
 ) {
-  console.log("👀 Starting workflow monitoring...");
-  
-  return mastra.workflow("clinicalTrialWorkflow").watch({
-    patientData,
-    demographics,
-  });
+  console.warn("⚠️ watchTrialMatchingWorkflow is deprecated. Use watchClinicalTrialWorkflow instead.");
+  return watchClinicalTrialWorkflow(patientData, demographics);
 }
 
 /**
