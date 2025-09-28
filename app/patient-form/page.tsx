@@ -12,10 +12,11 @@ import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Check, ChevronsUpDown, Pencil, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Check, ChevronsUpDown, Pencil, ArrowLeft, Loader2, AlertCircle, CheckCircle2, Mic } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 import { redirect, RedirectType } from 'next/navigation'
+import VoiceRecorder from "@/components/voice-recorder"
 
 interface FormData {
   diagnosis: string
@@ -129,6 +130,7 @@ export default function PatientForm() {
 
   const [tempInput, setTempInput] = useState("")
   const [diagnosisOpen, setDiagnosisOpen] = useState(false)
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false)
 
   const totalSteps = 12 // 0-10 form steps + 1 results step (0-11)
   const progress = ((currentStep + 1) / totalSteps) * 100
@@ -182,6 +184,15 @@ export default function PatientForm() {
       addArrayItem(field)
     }
   }
+
+  // Handle voice transcription completion
+  const handleTranscriptionComplete = (transcription: string) => {
+    console.log('🎙️ Voice transcription completed:', { transcription })
+    setShowVoiceRecorder(false)
+    // Automatically submit to Mastra workflow
+    submitVoiceData(transcription)
+  }
+
 
   // Format form data for API submission
   const formatPatientInfo = (): string => {
@@ -264,6 +275,67 @@ export default function PatientForm() {
     URL.revokeObjectURL(url)
   }
 
+  // Submit voice data directly to API
+  const submitVoiceData = async (transcription: string) => {
+    console.log('🚀 Voice data submission started');
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const payload = {
+        patientInfo: transcription, // Use transcription directly as patient info
+        demographics: {
+          location: "United States" // Default location
+        },
+        preferences: {
+          maxTrials: 3,
+          includeCompletedTrials: false,
+          maxLiteratureResults: 5
+        }
+      }
+
+      console.log('📤 Sending POST request to /api/find-trials with voice payload:', payload);
+
+      const response = await fetch('/api/find-trials', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      })
+
+      console.log('📥 Received response:', response.status, response.statusText);
+
+      const result: ApiResponse = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to find trials')
+      }
+
+      // Apply random ±10% fluctuation to match scores on the client side
+      if (result.data?.matches) {
+        result.data.matches = result.data.matches.map((trial) => {
+          const baseMatchScore = trial.matchScore;
+          const fluctuation = (Math.random() - 0.5) * 0.2; // ±10% (0.1 * 2 = 0.2)
+          const adjustedMatchScore = Math.max(0, Math.min(1, baseMatchScore + fluctuation));
+
+          return {
+            ...trial,
+            matchScore: adjustedMatchScore
+          };
+        });
+      }
+
+      setApiResponse(result)
+      setCurrentStep(totalSteps - 1) // Jump directly to results step
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // Submit form data to API
   const submitForm = async () => {
     console.log('🚀 Form submission started');
@@ -311,7 +383,7 @@ export default function PatientForm() {
           const baseMatchScore = trial.matchScore;
           const fluctuation = (Math.random() - 0.5) * 0.2; // ±10% (0.1 * 2 = 0.2)
           const adjustedMatchScore = Math.max(0, Math.min(1, baseMatchScore + fluctuation));
-          
+
           return {
             ...trial,
             matchScore: adjustedMatchScore
@@ -333,20 +405,47 @@ export default function PatientForm() {
     switch (currentStep) {
       case 0:
         return (
-          <Card className="w-full max-w-2xl mx-auto">
-            <CardHeader className="text-center">
-              <CardTitle className="text-3xl mb-4">Let&apos;s find the right clinical trial</CardTitle>
-              <p className="text-muted-foreground text-lg">
-                We&apos;ll ask you a few questions to match you with relevant clinical trials. This should take about 5
-                minutes.
-              </p>
-            </CardHeader>
-            <CardContent className="text-center pb-8">
-              <Button onClick={nextStep} size="lg" className="bg-teal-600 hover:bg-teal-700">
-                Start
-              </Button>
-            </CardContent>
-          </Card>
+          <div className="w-full max-w-4xl mx-auto space-y-6">
+            <Card>
+              <CardHeader className="text-center">
+                <CardTitle className="text-3xl mb-4">Let&apos;s find the right clinical trial</CardTitle>
+                <p className="text-muted-foreground text-lg">
+                  We&apos;ll ask you a few questions to match you with relevant clinical trials. This should take about 5
+                  minutes.
+                </p>
+              </CardHeader>
+              <CardContent className="text-center pb-8 space-y-4">
+                <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                  <Button onClick={nextStep} size="lg" className="bg-teal-600 hover:bg-teal-700">
+                    Start Manual Entry
+                  </Button>
+                  <div className="text-muted-foreground">or</div>
+                  <Button
+                    onClick={() => setShowVoiceRecorder(true)}
+                    size="lg"
+                    variant="outline"
+                    className="border-teal-600 text-teal-600 hover:bg-teal-50"
+                  >
+                    <Mic className="w-4 h-4 mr-2" />
+                    Record Conversation
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
+                  You can either fill out the form manually or record a doctor-patient conversation.
+                  Our AI will automatically extract relevant information from the conversation to populate the form.
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Voice Recording Modal/Section */}
+            {showVoiceRecorder && (
+              <VoiceRecorder
+                onTranscriptionComplete={handleTranscriptionComplete}
+                className="w-full"
+              />
+            )}
+
+          </div>
         )
 
       case 1:
