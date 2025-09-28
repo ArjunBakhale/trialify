@@ -85,7 +85,7 @@ interface ApiResponse {
     }
   }
   error?: string
-  details?: any
+  details?: unknown
 }
 
 const diagnoses = [
@@ -131,6 +131,9 @@ export default function PatientForm() {
   const [tempInput, setTempInput] = useState("")
   const [diagnosisOpen, setDiagnosisOpen] = useState(false)
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false)
+  const [voicePatientInfo, setVoicePatientInfo] = useState<string | null>(null)
+  const [showCustomDiagnosis, setShowCustomDiagnosis] = useState(false)
+  const [customDiagnosis, setCustomDiagnosis] = useState("")
 
   const totalSteps = 12 // 0-10 form steps + 1 results step (0-11)
   const progress = ((currentStep + 1) / totalSteps) * 100
@@ -188,9 +191,10 @@ export default function PatientForm() {
   // Handle voice transcription completion
   const handleTranscriptionComplete = (transcription: string) => {
     console.log('🎙️ Voice transcription completed:', { transcription })
+    setVoicePatientInfo(transcription)
     setShowVoiceRecorder(false)
-    // Automatically submit to Mastra workflow
-    submitVoiceData(transcription)
+    // Advance to first form step to collect structured data
+    nextStep()
   }
 
 
@@ -275,66 +279,6 @@ export default function PatientForm() {
     URL.revokeObjectURL(url)
   }
 
-  // Submit voice data directly to API
-  const submitVoiceData = async (transcription: string) => {
-    console.log('🚀 Voice data submission started');
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const payload = {
-        patientInfo: transcription, // Use transcription directly as patient info
-        demographics: {
-          location: "United States" // Default location
-        },
-        preferences: {
-          maxTrials: 3,
-          includeCompletedTrials: false,
-          maxLiteratureResults: 5
-        }
-      }
-
-      console.log('📤 Sending POST request to /api/find-trials with voice payload:', payload);
-
-      const response = await fetch('/api/find-trials', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      })
-
-      console.log('📥 Received response:', response.status, response.statusText);
-
-      const result: ApiResponse = await response.json()
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to find trials')
-      }
-
-      // Apply random ±10% fluctuation to match scores on the client side
-      if (result.data?.matches) {
-        result.data.matches = result.data.matches.map((trial) => {
-          const baseMatchScore = trial.matchScore;
-          const fluctuation = (Math.random() - 0.5) * 0.2; // ±10% (0.1 * 2 = 0.2)
-          const adjustedMatchScore = Math.max(0, Math.min(1, baseMatchScore + fluctuation));
-
-          return {
-            ...trial,
-            matchScore: adjustedMatchScore
-          };
-        });
-      }
-
-      setApiResponse(result)
-      setCurrentStep(totalSteps - 1) // Jump directly to results step
-
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   // Submit form data to API
   const submitForm = async () => {
@@ -342,10 +286,21 @@ export default function PatientForm() {
     setError(null)
 
     try {
-      const patientInfo = formatPatientInfo()
+      const structuredPatientInfo = formatPatientInfo()
+
+      // Combine voice transcript with structured form data
+      let combinedPatientInfo = structuredPatientInfo
+
+      if (voicePatientInfo) {
+        combinedPatientInfo = `DOCTOR-PATIENT CONVERSATION:
+${voicePatientInfo}
+
+STRUCTURED PATIENT DATA:
+${structuredPatientInfo}`
+      }
 
       const payload = {
-        patientInfo,
+        patientInfo: combinedPatientInfo,
         demographics: {
           age: formData.age ? parseInt(formData.age) : undefined,
           location: "United States" // Default location, could be made configurable
@@ -402,32 +357,37 @@ export default function PatientForm() {
           <div className="w-full max-w-4xl mx-auto space-y-6">
             <Card>
               <CardHeader className="text-center">
-                <CardTitle className="text-3xl mb-4">Let&apos;s find the right clinical trial</CardTitle>
+                <CardTitle className="text-3xl mb-4">Let&apos;s capture your medical conversation</CardTitle>
                 <p className="text-muted-foreground text-lg">
-                  We&apos;ll ask you a few questions to match you with relevant clinical trials. This should take about 5
-                  minutes.
+                  Start by recording your doctor-patient conversation for the most accurate clinical trial matching.
+                  We&apos;ll then help you complete additional details.
                 </p>
               </CardHeader>
-              <CardContent className="text-center pb-8 space-y-4">
-                <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                  <Button onClick={nextStep} size="lg" className="bg-teal-600 hover:bg-teal-700">
-                    Start Manual Entry
-                  </Button>
-                  <div className="text-muted-foreground">or</div>
+              <CardContent className="text-center pb-8 space-y-6">
+                <div className="space-y-4">
                   <Button
                     onClick={() => setShowVoiceRecorder(true)}
                     size="lg"
-                    variant="outline"
-                    className="border-teal-600 text-teal-600 hover:bg-teal-50"
+                    className="bg-teal-600 hover:bg-teal-700 text-lg px-8 py-4 h-auto"
                   >
-                    <Mic className="w-4 h-4 mr-2" />
-                    Record Conversation
+                    <Mic className="w-5 h-5 mr-3" />
+                    Start Voice Recording
                   </Button>
+
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
+                      Record a conversation between doctor and patient discussing medical conditions,
+                      symptoms, medications, and treatment plans for comprehensive analysis.
+                    </p>
+                    <Button
+                      onClick={nextStep}
+                      variant="ghost"
+                      className="text-teal-600 hover:text-teal-700 hover:bg-teal-50"
+                    >
+                      Skip voice recording and fill form manually
+                    </Button>
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-                  You can either fill out the form manually or record a doctor-patient conversation.
-                  Our AI will automatically extract relevant information from the conversation to populate the form.
-                </p>
               </CardContent>
             </Card>
 
@@ -439,10 +399,175 @@ export default function PatientForm() {
               />
             )}
 
+            {/* Voice Data Indicator */}
+            {voicePatientInfo && (
+              <Card className="border-teal-200 bg-teal-50/50">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 justify-center">
+                    <CheckCircle2 className="w-5 h-5 text-teal-600" />
+                    <span className="text-teal-800 font-medium">Voice conversation recorded successfully</span>
+                    <Badge variant="outline" className="border-teal-300 text-teal-700 bg-teal-50">
+                      Ready to continue
+                    </Badge>
+                  </div>
+                  <p className="text-center text-sm text-teal-600 mt-2">
+                    Your conversation will be combined with the form data for better clinical trial matching.
+                  </p>
+                  <div className="flex gap-3 justify-center mt-4">
+                    <Button
+                      onClick={nextStep}
+                      className="bg-teal-600 hover:bg-teal-700"
+                    >
+                      Continue to Form
+                    </Button>
+                    <Button
+                      onClick={() => setVoicePatientInfo(null)}
+                      variant="outline"
+                      className="border-teal-300 text-teal-700 hover:bg-teal-50"
+                    >
+                      Clear Recording
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
           </div>
         )
 
       case 1:
+        return (
+          <Card className="w-full max-w-2xl mx-auto">
+            <CardHeader>
+              <CardTitle className="text-2xl">Please enter the latest available lab values</CardTitle>
+              {voicePatientInfo && (
+                <div className="flex items-center gap-2 mt-2">
+                  <CheckCircle2 className="w-4 h-4 text-teal-600" />
+                  <span className="text-sm text-teal-600">Voice conversation recorded - completing form for better matching</span>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="hba1c">HbA1c (%)</Label>
+                  <Input
+                    id="hba1c"
+                    type="number"
+                    step="0.1"
+                    placeholder="7.2"
+                    value={formData.labValues.hba1c}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        labValues: { ...prev.labValues, hba1c: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="egfr">eGFR (mL/min/1.73m²)</Label>
+                  <Input
+                    id="egfr"
+                    type="number"
+                    placeholder="90"
+                    value={formData.labValues.egfr}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        labValues: { ...prev.labValues, egfr: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ldl">LDL (mg/dL)</Label>
+                  <Input
+                    id="ldl"
+                    type="number"
+                    placeholder="100"
+                    value={formData.labValues.ldl}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        labValues: { ...prev.labValues, ldl: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hdl">HDL (mg/dL)</Label>
+                  <Input
+                    id="hdl"
+                    type="number"
+                    placeholder="50"
+                    value={formData.labValues.hdl}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        labValues: { ...prev.labValues, hdl: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <Button onClick={nextStep} className="w-full bg-teal-600 hover:bg-teal-700">
+                Continue
+              </Button>
+            </CardContent>
+          </Card>
+        )
+
+      case 2:
+        return (
+          <Card className="w-full max-w-2xl mx-auto">
+            <CardHeader>
+              <CardTitle className="text-2xl">What is their most recent blood pressure reading?</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex gap-4 items-center">
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="systolic">Systolic</Label>
+                  <Input
+                    id="systolic"
+                    type="number"
+                    placeholder="120"
+                    value={formData.bloodPressure.systolic}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        bloodPressure: { ...prev.bloodPressure, systolic: e.target.value },
+                      }))
+                    }
+                    className="h-12 text-lg"
+                  />
+                </div>
+                <div className="text-2xl text-muted-foreground">/</div>
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="diastolic">Diastolic</Label>
+                  <Input
+                    id="diastolic"
+                    type="number"
+                    placeholder="80"
+                    value={formData.bloodPressure.diastolic}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        bloodPressure: { ...prev.bloodPressure, diastolic: e.target.value },
+                      }))
+                    }
+                    className="h-12 text-lg"
+                  />
+                </div>
+              </div>
+              <Button onClick={nextStep} className="w-full bg-teal-600 hover:bg-teal-700">
+                Continue
+              </Button>
+            </CardContent>
+          </Card>
+        )
+
+      case 3:
         return (
           <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
@@ -532,7 +657,7 @@ export default function PatientForm() {
           </Card>
         )
 
-      case 2:
+      case 4:
         return (
           <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
@@ -553,7 +678,7 @@ export default function PatientForm() {
           </Card>
         )
 
-      case 3:
+      case 5:
         return (
           <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
@@ -588,7 +713,7 @@ export default function PatientForm() {
           </Card>
         )
 
-      case 4:
+      case 6:
         return (
           <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
@@ -623,7 +748,7 @@ export default function PatientForm() {
           </Card>
         )
 
-      case 5:
+      case 7:
         return (
           <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
@@ -658,7 +783,7 @@ export default function PatientForm() {
           </Card>
         )
 
-      case 6:
+      case 8:
         return (
           <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
@@ -685,132 +810,6 @@ export default function PatientForm() {
                     </button>
                   </Badge>
                 ))}
-              </div>
-              <Button onClick={nextStep} className="w-full bg-teal-600 hover:bg-teal-700">
-                Continue
-              </Button>
-            </CardContent>
-          </Card>
-        )
-
-      case 7:
-        return (
-          <Card className="w-full max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-2xl">Please enter the latest available lab values</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="hba1c">HbA1c (%)</Label>
-                  <Input
-                    id="hba1c"
-                    type="number"
-                    step="0.1"
-                    placeholder="7.2"
-                    value={formData.labValues.hba1c}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        labValues: { ...prev.labValues, hba1c: e.target.value },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="egfr">eGFR (mL/min/1.73m²)</Label>
-                  <Input
-                    id="egfr"
-                    type="number"
-                    placeholder="90"
-                    value={formData.labValues.egfr}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        labValues: { ...prev.labValues, egfr: e.target.value },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ldl">LDL (mg/dL)</Label>
-                  <Input
-                    id="ldl"
-                    type="number"
-                    placeholder="100"
-                    value={formData.labValues.ldl}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        labValues: { ...prev.labValues, ldl: e.target.value },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="hdl">HDL (mg/dL)</Label>
-                  <Input
-                    id="hdl"
-                    type="number"
-                    placeholder="50"
-                    value={formData.labValues.hdl}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        labValues: { ...prev.labValues, hdl: e.target.value },
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-              <Button onClick={nextStep} className="w-full bg-teal-600 hover:bg-teal-700">
-                Continue
-              </Button>
-            </CardContent>
-          </Card>
-        )
-
-      case 8:
-        return (
-          <Card className="w-full max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-2xl">What is their most recent blood pressure reading?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex gap-4 items-center">
-                <div className="flex-1 space-y-2">
-                  <Label htmlFor="systolic">Systolic</Label>
-                  <Input
-                    id="systolic"
-                    type="number"
-                    placeholder="120"
-                    value={formData.bloodPressure.systolic}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        bloodPressure: { ...prev.bloodPressure, systolic: e.target.value },
-                      }))
-                    }
-                    className="h-12 text-lg"
-                  />
-                </div>
-                <div className="text-2xl text-muted-foreground">/</div>
-                <div className="flex-1 space-y-2">
-                  <Label htmlFor="diastolic">Diastolic</Label>
-                  <Input
-                    id="diastolic"
-                    type="number"
-                    placeholder="80"
-                    value={formData.bloodPressure.diastolic}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        bloodPressure: { ...prev.bloodPressure, diastolic: e.target.value },
-                      }))
-                    }
-                    className="h-12 text-lg"
-                  />
-                </div>
               </div>
               <Button onClick={nextStep} className="w-full bg-teal-600 hover:bg-teal-700">
                 Continue
@@ -869,14 +868,24 @@ export default function PatientForm() {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
-              
+
+              {/* Voice Data Indicator in Review */}
+              {voicePatientInfo && (
+                <Alert className="border-teal-200 bg-teal-50">
+                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
+                  <AlertDescription className="text-teal-800">
+                    <strong>Voice conversation included:</strong> Your recorded doctor-patient conversation will be combined with this form data for comprehensive clinical trial matching.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="grid gap-6">
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h3 className="font-semibold">Primary Diagnosis</h3>
                     <p className="text-muted-foreground">{formData.diagnosis || "Not specified"}</p>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => goToStep(1)}>
+                  <Button variant="ghost" size="sm" onClick={() => goToStep(3)}>
                     <Pencil className="w-4 h-4" />
                   </Button>
                 </div>
@@ -886,7 +895,7 @@ export default function PatientForm() {
                     <h3 className="font-semibold">Age</h3>
                     <p className="text-muted-foreground">{formData.age || "Not specified"}</p>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => goToStep(2)}>
+                  <Button variant="ghost" size="sm" onClick={() => goToStep(4)}>
                     <Pencil className="w-4 h-4" />
                   </Button>
                 </div>
@@ -906,7 +915,7 @@ export default function PatientForm() {
                       )}
                     </div>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => goToStep(3)}>
+                  <Button variant="ghost" size="sm" onClick={() => goToStep(5)}>
                     <Pencil className="w-4 h-4" />
                   </Button>
                 </div>
@@ -1048,7 +1057,7 @@ export default function PatientForm() {
 
             {/* Trial Results */}
             <div className="grid gap-6">
-              {apiResponse.data.matches.map((trial, index) => (
+              {apiResponse.data.matches.map((trial) => (
                 <Card key={trial.id} className="border-l-4 border-l-teal-500">
                   <CardHeader>
                     <div className="flex justify-between items-start">
