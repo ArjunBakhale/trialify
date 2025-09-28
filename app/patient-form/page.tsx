@@ -280,6 +280,67 @@ export default function PatientForm() {
   }
 
 
+  // Skip to results with voice data only
+  const skipToResults = async () => {
+    if (!voicePatientInfo) {
+      setError("Voice recording is required to skip questions")
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const payload = {
+        patientInfo: `DOCTOR-PATIENT CONVERSATION: ${voicePatientInfo}`,
+        demographics: {
+          location: "United States"
+        },
+        preferences: {
+          maxTrials: 3,
+          includeCompletedTrials: false,
+          maxLiteratureResults: 5
+        }
+      }
+
+      const response = await fetch('/api/find-trials', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const result: ApiResponse = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to find trials')
+      }
+
+      // Apply random ±10% fluctuation to match scores on the client side
+      if (result.data?.matches) {
+        result.data.matches = result.data.matches.map((trial) => {
+          const baseMatchScore = trial.matchScore;
+          const fluctuation = (Math.random() - 0.5) * 0.2; // ±10% (0.1 * 2 = 0.2)
+          const adjustedMatchScore = Math.max(0, Math.min(1, baseMatchScore + fluctuation));
+
+          return {
+            ...trial,
+            matchScore: adjustedMatchScore
+          };
+        });
+      }
+
+      setApiResponse(result)
+      setCurrentStep(totalSteps - 1) // Go directly to results step
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // Submit form data to API
   const submitForm = async () => {
     setIsLoading(true)
@@ -399,6 +460,14 @@ ${structuredPatientInfo}`
               />
             )}
 
+            {/* Error Display */}
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
             {/* Voice Data Indicator */}
             {voicePatientInfo && (
               <Card className="border-teal-200 bg-teal-50/50">
@@ -511,9 +580,35 @@ ${structuredPatientInfo}`
                   />
                 </div>
               </div>
+
               <Button onClick={nextStep} className="w-full bg-teal-600 hover:bg-teal-700">
                 Continue
               </Button>
+
+              {/* Skip button - only show if voice recording exists */}
+              {voicePatientInfo && (
+                <div className="text-center mt-4">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Already have voice conversation?
+                  </p>
+                  <Button
+                    onClick={skipToResults}
+                    disabled={isLoading}
+                    variant="ghost"
+                    size="sm"
+                    className="text-teal-600 hover:text-teal-700 hover:bg-teal-50"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                        Finding Trials...
+                      </>
+                    ) : (
+                      'Skip Questions & Find Trials'
+                    )}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )
