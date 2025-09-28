@@ -338,13 +338,11 @@ export default function PatientForm() {
 
   // Submit form data to API
   const submitForm = async () => {
-    console.log('🚀 Form submission started');
     setIsLoading(true)
     setError(null)
 
     try {
       const patientInfo = formatPatientInfo()
-      console.log('📋 Formatted patient info:', patientInfo);
 
       const payload = {
         patientInfo,
@@ -359,8 +357,6 @@ export default function PatientForm() {
         }
       }
 
-      console.log('📤 Sending POST request to /api/find-trials with payload:', payload);
-
       const response = await fetch('/api/find-trials', {
         method: 'POST',
         headers: {
@@ -368,8 +364,6 @@ export default function PatientForm() {
         },
         body: JSON.stringify(payload)
       })
-
-      console.log('📥 Received response:', response.status, response.statusText);
 
       const result: ApiResponse = await response.json()
 
@@ -479,6 +473,7 @@ export default function PatientForm() {
                             value={diagnosis}
                             onSelect={(currentValue) => {
                               setFormData((prev) => ({ ...prev, diagnosis: currentValue }))
+                              setShowCustomDiagnosis(false)
                               setDiagnosisOpen(false)
                             }}
                           >
@@ -491,11 +486,41 @@ export default function PatientForm() {
                             {diagnosis}
                           </CommandItem>
                         ))}
+                        <CommandItem
+                          value="Other"
+                          onSelect={() => {
+                            setShowCustomDiagnosis(true)
+                            setDiagnosisOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              showCustomDiagnosis ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          Other
+                        </CommandItem>
                       </CommandGroup>
                     </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
+              {showCustomDiagnosis && (
+                <div className="mt-4">
+                  <Label htmlFor="custom-diagnosis">Other primary diagnosis:</Label>
+                  <Input
+                    id="custom-diagnosis"
+                    value={customDiagnosis}
+                    onChange={(e) => {
+                      setCustomDiagnosis(e.target.value)
+                      setFormData((prev) => ({ ...prev, diagnosis: e.target.value }))
+                    }}
+                    placeholder="Type your diagnosis here"
+                    className="mt-2"
+                  />
+                </div>
+              )}
               <Button
                 onClick={nextStep}
                 disabled={!formData.diagnosis}
