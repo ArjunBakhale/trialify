@@ -255,6 +255,8 @@ async function searchClinicalTrials(searchParams: any, isFallback: boolean = fal
         params.append('distance', searchParams.locationRadius.toString());
       }
     }
+
+    params.append('filter.overallStatus', "NOT_YET_RECRUITING,RECRUITING,ACTIVE_NOT_RECRUITING,AVAILABLE");
     
     // REMOVED INVALID PARAMETERS:
     // - query.age (NOT SUPPORTED)
